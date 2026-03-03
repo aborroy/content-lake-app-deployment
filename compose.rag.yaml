@@ -1,0 +1,196 @@
+services:
+  batch-ingester:
+    build:
+      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake.git#main}"
+      dockerfile_inline: |
+        # syntax=docker/dockerfile:1.7
+        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+        WORKDIR /workspace
+        COPY pom.xml .
+        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
+        COPY batch-ingester/pom.xml batch-ingester/pom.xml
+        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY rag-service/pom.xml rag-service/pom.xml
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl batch-ingester -am dependency:go-offline
+        COPY content-lake-common/src content-lake-common/src
+        COPY batch-ingester/src batch-ingester/src
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl batch-ingester -am package
+        RUN mkdir -p /layers \
+         && JAR="$$(ls -1 batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
+        FROM eclipse-temurin:21-jre-alpine
+        RUN addgroup -S app && adduser -S -G app app
+        WORKDIR /app
+        COPY --from=build /layers/dependencies/ ./
+        COPY --from=build /layers/snapshot-dependencies/ ./
+        COPY --from=build /layers/spring-boot-loader/ ./
+        COPY --from=build /layers/application/ ./
+        USER app
+        EXPOSE 9090
+        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+          CMD wget -qO- http://localhost:9090/actuator/health || exit 1
+        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
+        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+    environment:
+      ALFRESCO_URL: http://alfresco:8080
+      ALFRESCO_INTERNAL_USERNAME: admin
+      ALFRESCO_INTERNAL_PASSWORD: admin
+      HXPR_URL: http://hxpr-app:8080
+      HXPR_REPOSITORY_ID: default
+      HXPR_TARGET_PATH: /alfresco-sync
+      HXPR_IDP_TOKEN_URL: http://idp:8080/idp/connect/token
+      HXPR_IDP_CLIENT_ID: nuxeo-client
+      HXPR_IDP_CLIENT_SECRET: secret
+      HXPR_IDP_USERNAME: testuser
+      HXPR_IDP_PASSWORD: password
+      TRANSFORM_URL: http://transform-core-aio:8090
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://model-runner.docker.internal}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+    depends_on:
+      alfresco:
+        condition: service_healthy
+      hxpr-app:
+        condition: service_healthy
+    networks:
+      - stack
+
+  live-ingester:
+    build:
+      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake.git#main}"
+      dockerfile_inline: |
+        # syntax=docker/dockerfile:1.7
+        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+        WORKDIR /workspace
+        COPY pom.xml .
+        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
+        COPY batch-ingester/pom.xml batch-ingester/pom.xml
+        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY rag-service/pom.xml rag-service/pom.xml
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl live-ingester -am dependency:go-offline
+        COPY content-lake-common/src content-lake-common/src
+        COPY live-ingester/src live-ingester/src
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl live-ingester -am package
+        RUN mkdir -p /layers \
+         && JAR="$$(ls -1 live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
+        FROM eclipse-temurin:21-jre-alpine
+        RUN addgroup -S app && adduser -S -G app app
+        WORKDIR /app
+        COPY --from=build /layers/dependencies/ ./
+        COPY --from=build /layers/snapshot-dependencies/ ./
+        COPY --from=build /layers/spring-boot-loader/ ./
+        COPY --from=build /layers/application/ ./
+        USER app
+        EXPOSE 9092
+        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+          CMD wget -qO- http://localhost:9092/actuator/health || exit 1
+        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
+        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+    environment:
+      ACTIVEMQ_URL: tcp://activemq:61616
+      ACTIVEMQ_USER: admin
+      ACTIVEMQ_PASSWORD: admin
+      ALFRESCO_EVENT_TOPIC: alfresco.repo.event2
+      ALFRESCO_URL: http://alfresco:8080
+      ALFRESCO_INTERNAL_USERNAME: admin
+      ALFRESCO_INTERNAL_PASSWORD: admin
+      HXPR_URL: http://hxpr-app:8080
+      HXPR_REPOSITORY_ID: default
+      HXPR_TARGET_PATH: /alfresco-sync
+      HXPR_IDP_TOKEN_URL: http://idp:8080/idp/connect/token
+      HXPR_IDP_CLIENT_ID: nuxeo-client
+      HXPR_IDP_CLIENT_SECRET: secret
+      HXPR_IDP_USERNAME: testuser
+      HXPR_IDP_PASSWORD: password
+      TRANSFORM_URL: http://transform-core-aio:8090
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://model-runner.docker.internal}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+    depends_on:
+      alfresco:
+        condition: service_healthy
+      activemq:
+        condition: service_started
+      hxpr-app:
+        condition: service_healthy
+    networks:
+      - stack
+
+  rag-service:
+    build:
+      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake.git#main}"
+      dockerfile_inline: |
+        # syntax=docker/dockerfile:1.7
+        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+        WORKDIR /workspace
+        COPY pom.xml .
+        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
+        COPY batch-ingester/pom.xml batch-ingester/pom.xml
+        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY rag-service/pom.xml rag-service/pom.xml
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl rag-service -am dependency:go-offline
+        COPY content-lake-common/src content-lake-common/src
+        COPY rag-service/src rag-service/src
+        RUN --mount=type=cache,target=/root/.m2 \
+            mvn -q -DskipTests -pl rag-service -am package
+        RUN mkdir -p /layers \
+         && JAR="$$(ls -1 rag-service/target/*.jar | grep -v 'original' | head -n 1)" \
+         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
+        FROM eclipse-temurin:21-jre-alpine
+        RUN addgroup -S app && adduser -S -G app app
+        WORKDIR /app
+        COPY --from=build /layers/dependencies/ ./
+        COPY --from=build /layers/snapshot-dependencies/ ./
+        COPY --from=build /layers/spring-boot-loader/ ./
+        COPY --from=build /layers/application/ ./
+        USER app
+        EXPOSE 9091
+        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+          CMD wget -qO- http://localhost:9091/actuator/health || exit 1
+        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
+        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+    environment:
+      ALFRESCO_URL: http://alfresco:8080
+      ALFRESCO_INTERNAL_USERNAME: admin
+      ALFRESCO_INTERNAL_PASSWORD: admin
+      HXPR_URL: http://hxpr-app:8080
+      HXPR_REPOSITORY_ID: default
+      HXPR_IDP_TOKEN_URL: http://idp:8080/idp/connect/token
+      HXPR_IDP_CLIENT_ID: nuxeo-client
+      HXPR_IDP_CLIENT_SECRET: secret
+      HXPR_IDP_USERNAME: testuser
+      HXPR_IDP_PASSWORD: password
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://model-runner.docker.internal}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+      LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
+      LLM_TEMPERATURE: "0.3"
+      LLM_MAX_TOKENS: "1024"
+      RAG_DEFAULT_TOP_K: "5"
+      RAG_DEFAULT_MIN_SCORE: "0.5"
+      RAG_MAX_CONTEXT_LENGTH: "12000"
+    depends_on:
+      alfresco:
+        condition: service_healthy
+      hxpr-app:
+        condition: service_healthy
+    networks:
+      - stack
+
+  content-app:
+    build:
+      context: "${CONTENT_LAKE_UI_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake-ui.git#main}"
+      dockerfile: docker/Dockerfile
+      args:
+        ACA_TAG: ${ACA_TAG:-7.3.0}
+    environment:
+      APP_CONFIG_ECM_HOST: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-8080}
+      APP_CONFIG_RAG_URL: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-8080}
+    networks:
+      - stack

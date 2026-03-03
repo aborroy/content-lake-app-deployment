@@ -1,0 +1,8 @@
+# Local environment overrides
+.env.local
+
+# macOS
+.DS_Store
+
+# Docker build artifacts
+*.tar

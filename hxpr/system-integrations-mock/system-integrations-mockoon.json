@@ -1,0 +1,430 @@
+{
+  "uuid": "9ea30b46-59ff-4c25-a6a9-1f346a440e5a",
+  "lastMigration": 33,
+  "name": "System Integrations API",
+  "endpointPrefix": "",
+  "latency": 0,
+  "port": 3002,
+  "hostname": "",
+  "folders": [
+    {
+      "uuid": "776d2273-1d75-4aa9-920a-93920530d48f",
+      "name": "Principal Users",
+      "children": [
+        {
+          "type": "route",
+          "uuid": "1591ca38-3aae-4712-8ed6-71de4015f6f4"
+        },
+        {
+          "type": "route",
+          "uuid": "196939e5-ccad-4dbc-a605-dede1cc8e1c2"
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "uuid": "1591ca38-3aae-4712-8ed6-71de4015f6f4",
+      "type": "http",
+      "documentation": "Get a list of user mappings for a principal user.",
+      "method": "get",
+      "endpoint": "system-integrations/principal-users/:principalUserId/user-mappings",
+      "responses": [
+        {
+          "uuid": "a04ddd06-5cee-4544-b718-7eb8abd1cf66",
+          "body": "",
+          "latency": 0,
+          "statusCode": 401,
+          "label": "Unauthorized",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "header",
+              "modifier": "Authorization",
+              "value": "",
+              "invert": false,
+              "operator": "null"
+            },
+            {
+              "target": "header",
+              "modifier": "Authorization",
+              "value": "^Bearer .+$",
+              "invert": true,
+              "operator": "regex"
+            }
+          ],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "e1955fff-155c-42a2-bcab-0b340fac18e1",
+          "body": "{\n  \"items\": []\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Requested for user with no external user mappings",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+              "invert": false,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "88b2702a-2110-486b-9784-3b0835b7326c",
+          "body": "{\n  \"items\": [\n    {\n      \"systemId\": \"b7818235-1b4b-4038-98b2-0cfae875f481\",\n      \"externalUserId\": \"some-external-user\",\n      \"attributes\": [\n        {\n          \"key\": \"test-user-attribute\",\n          \"values\": [\n            \"foo\",\n            \"bar\"\n          ]\n        }\n      ]\n    }\n  ]\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Requested for unit test user with test attributes",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "unit-test-user-with-attributes",
+              "invert": false,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "e8b2b8bb-8421-4538-b7e4-578c29007273",
+          "body": "",
+          "latency": 0,
+          "statusCode": 404,
+          "label": "The requested resource does not exist.",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+              "invert": true,
+              "operator": "equals"
+            },
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "unit-test-user-with-attributes",
+              "invert": true,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "112ba5bb-12bb-4802-a91f-2e2d14fc2d84",
+          "body": "{\n  \"message\": \"something went wrong during rule evaluation in nucleus systems integration mock. Please check the rules for each response.\"\n}",
+          "latency": 0,
+          "statusCode": 500,
+          "label": "Something went wrong with rules evaluation",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "196939e5-ccad-4dbc-a605-dede1cc8e1c2",
+      "type": "http",
+      "documentation": "Returns the direct groups membership for given principal user. Output results are flattened.",
+      "method": "get",
+      "endpoint": "system-integrations/principal-users/:principalUserId/membership",
+      "responses": [
+        {
+          "uuid": "ee76977b-ba15-4b7c-98f8-065644e2ec4d",
+          "body": "",
+          "latency": 0,
+          "statusCode": 401,
+          "label": "Unauthorized",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "header",
+              "modifier": "Authorization",
+              "value": "",
+              "invert": false,
+              "operator": "null"
+            },
+            {
+              "target": "header",
+              "modifier": "Authorization",
+              "value": "^Bearer .+$",
+              "invert": true,
+              "operator": "regex"
+            }
+          ],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "3599b66b-4da4-47d2-b195-ccd7d97b345f",
+          "body": "{\n  \"items\": []\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Empty list of mappings",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+              "invert": false,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "3423efa0-7bdb-4b11-93b7-c9d356801801",
+          "body": "{\n  \"items\": [\n    {\n      \"externalGroupId\": \"some-external-group\",\n      \"systemId\": \"b7818235-1b4b-4038-98b2-0cfae875f481\",\n      \"membershipType\": \"Direct\",\n      \"attributes\": [\n        {\n          \"key\": \"test-group-attribute\",\n          \"values\": [\n            \"foo\",\n            \"bar\"\n          ]\n        }\n      ]\n    }\n  ]\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Requested for unit test user with group attributes",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "unit-test-user-with-attributes",
+              "invert": false,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "0123cc0d-cf9f-4b64-818f-8d7a0f811329",
+          "body": "",
+          "latency": 0,
+          "statusCode": 404,
+          "label": "Not Found",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+              "invert": true,
+              "operator": "equals"
+            },
+            {
+              "target": "params",
+              "modifier": "principalUserId",
+              "value": "unit-test-user-with-attributes",
+              "invert": true,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "AND",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "8b0780d4-363a-4e6b-b486-b06d8eae4de2",
+          "body": "{\n  \"message\": \"something went wrong during rule evaluation in nucleus systems integration mock. Please check the rules for each response.\"\n}",
+          "latency": 0,
+          "statusCode": 500,
+          "label": "Something went wrong with rules evaluation.",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    }
+  ],
+  "rootChildren": [
+    {
+      "type": "folder",
+      "uuid": "776d2273-1d75-4aa9-920a-93920530d48f"
+    }
+  ],
+  "proxyMode": false,
+  "proxyHost": "",
+  "proxyRemovePrefix": false,
+  "tlsOptions": {
+    "enabled": false,
+    "type": "CERT",
+    "pfxPath": "",
+    "certPath": "",
+    "keyPath": "",
+    "caPath": "",
+    "passphrase": ""
+  },
+  "cors": true,
+  "headers": [
+    {
+      "key": "Access-Control-Allow-Origin",
+      "value": "*"
+    },
+    {
+      "key": "Access-Control-Allow-Methods",
+      "value": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"
+    },
+    {
+      "key": "Access-Control-Allow-Headers",
+      "value": "Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"
+    }
+  ],
+  "proxyReqHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "proxyResHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "data": [],
+  "callbacks": []
+}

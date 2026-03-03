@@ -1,0 +1,193 @@
+services:
+  idp:
+    image: ghcr.io/hylandexperience/hxp/iam/api.mock:${IDP_TAG:-26.35.14}
+    hostname: idp
+    volumes:
+      - ./hxpr/idp/identity-resources.json:/app/seeddata/local/web.seeddata.json:ro
+    networks:
+      - stack
+
+  mongodb:
+    image: mongo:${MONGODB_TAG:-8.2.5}
+    hostname: mongo
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - stack
+
+  opensearch:
+    image: opensearchproject/opensearch:${OPENSEARCH_TAG:-3.5.0}
+    hostname: opensearch
+    environment:
+      discovery.type: single-node
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      plugins.security.disabled: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD:-Hyland_Pass1!}
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - stack
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:${OPENSEARCH_TAG:-3.5.0}
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - stack
+
+  localstack:
+    image: localstack/localstack:${LOCALSTACK_TAG:-4.13.1}
+    environment:
+      SERVICES: s3,sts,sqs,sns
+      DISABLE_CORS_CHECKS: "1"
+      DEFAULT_REGION: us-east-1
+      LOCALSTACK_HOST: localstack
+      PERSISTENCE: "1"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./hxpr/localstack/init.sh:/etc/localstack/init/ready.d/01-hxpr-init.sh:ro
+      - ./localstack/init-additional.sh:/etc/localstack/init/ready.d/02-additional-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs list-queues > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - stack
+
+  mockoon:
+    image: mockoon/cli:${MOCKOON_TAG:-9.3.0}
+    hostname: mockoon
+    volumes:
+      - ./hxpr/system-integrations-mock/system-integrations-mockoon.json:/data:ro
+    command: --data data --port 3002
+    networks:
+      - stack
+
+  aio:
+    image: ghcr.io/hylandsoftware/hxp-transform-aio:${HXTS_TAG:-3.0.566}
+    environment:
+      SFS_URL: http://rest:8098/private/file
+      AIO_URL: http://aio:8090
+      AWS_SQS_ENDPOINT: http://localstack:4566
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      SPRING_PROFILES_ACTIVE: default,local
+    volumes:
+      - shared-file-store:/tmp/filestore
+    networks:
+      - stack
+
+  router:
+    image: ghcr.io/hylandsoftware/hxp-transform-router:${HXTS_TAG:-3.0.566}
+    environment:
+      SFS_URL: http://rest:8098/private/file
+      AIO_URL: http://aio:8090
+      AWS_SQS_ENDPOINT: http://localstack:4566
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      SPRING_PROFILES_ACTIVE: default,local
+    volumes:
+      - shared-file-store:/tmp/filestore
+    networks:
+      - stack
+
+  rest:
+    image: ghcr.io/hylandsoftware/hxp-transform-rest:${HXTS_TAG:-3.0.566}
+    environment:
+      REST_AUTHENTICATED: "false"
+      ROUTER_URL: http://router:8095
+      IDP_URL: http://idp:8080
+      SFS_SHARE_EFS: "true"
+      ENV_ID: localenv
+      HXTS_REPLY_TO: hxts_rest
+      QUEUE_AUTO_CREATE: "true"
+      AWS_SQS_ENDPOINT: http://localstack:4566
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      SPRING_PROFILES_ACTIVE: default,local
+    volumes:
+      - shared-file-store:/tmp/filestore
+    depends_on:
+      - router
+      - localstack
+    networks:
+      - stack
+
+  hxpr-app:
+    image: "${HXPR_LOCAL_IMAGE:-alfresco-content-lake/hxpr-app:local}"
+    build:
+      context: .
+      dockerfile: ./hxpr/Dockerfile
+      args:
+        HXPR_GIT_URL: ${HXPR_GIT_URL:-https://github.com/HylandSoftware/hxpr.git}
+        HXPR_GIT_REF: ${HXPR_GIT_REF:-feature/CIN-1509-CreateEmbeddingAPI}
+        HXPR_GIT_SHA: ${HXPR_GIT_SHA:-}
+      secrets:
+        - source: hxpr_git_auth_token
+          target: hxpr_git_auth_token
+        - source: maven_username
+          target: maven_username
+        - source: maven_password
+          target: maven_password
+        - source: nexus_username
+          target: nexus_username
+        - source: nexus_password
+          target: nexus_password
+    environment:
+      JAVA_OPTIONS: >-
+        -Dnuxeo.mongodb.server=mongodb:27017
+        -Dnuxeo.aws.accessKeyId=000000000000
+        -Dnuxeo.aws.secretAccessKey=000000000000
+        -Dnuxeo.aws.region=us-east-1
+        -Dnuxeo.aws.endpoint=http://localstack:4566
+        -Dnuxeo.aws.sns.topic.arn=arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
+      NUXEO_MONGODB_SERVER: mongodb:27017
+      OPENSEARCH_ADDRESSLIST: http://opensearch:9200
+      IDP_URL: http://idp:8080
+      NUCLEUS_URL: http://mockoon:3002
+      ROUTER_URL: http://router:8095
+      SFS_URL: http://rest:8098/private/file
+      ENV_ID: localenv
+      HXTS_REPLY_TO: localapp
+      NUXEO_AWS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
+      NUXEO_AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      AWS_SQS_ENDPOINT: http://localstack:4566
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      idp:
+        condition: service_started
+      mockoon:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      - stack

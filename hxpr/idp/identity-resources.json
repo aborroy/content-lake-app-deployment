@@ -1,0 +1,947 @@
+{
+  "MockAppSubscriptions": {
+    "hxprApp": {
+      "AppKey": "hxprApp",
+      "Subscriptions": {
+        "subscription1": {
+          "SubscriptionId": "5714d708-b092-7430-3f8d-583f4bdca111",
+          "EnvironmentId": "5714d708-b092-7430-3f8d-583f4bdca222",
+          "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247"
+        }
+      }
+    },
+    "hxts": {
+      "AppKey": "hxts",
+      "Subscriptions": {
+        "subscription1": {
+          "SubscriptionId": "5714d708-b092-7430-3f8d-583f4bdca111",
+          "EnvironmentId": "5714d708-b092-7430-3f8d-583f4bdca222",
+          "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247"
+        }
+      }
+    },
+    "hxpr": {
+      "AppKey": "hxpr",
+      "Subscriptions": {
+        "subscription1": {
+          "SubscriptionId": "5714d708-b092-7430-3f8d-583f4bdca111",
+          "EnvironmentId": "5714d708-b092-7430-3f8d-583f4bdca222",
+          "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247"
+        }
+      }
+    }
+  },
+  "Clients": [
+    {
+      "ClientId": "nuxeo-client",
+      "ClientName": "Nuxeo Repository",
+      "AllowedScopes": [
+        "profile",
+        "test-api",
+        "openid",
+        "email",
+        "memberOf",
+        "hxp",
+        "hxp.integrations",
+        "iam.system",
+        "iam_configuration_api",
+        "hxp.nucleus.provisioning",
+        "hxpr",
+        "profile.attributes"
+      ],
+      "AllowedGrantTypes": [
+        "urn:hyland:params:oauth:grant-type:api-credentials",
+        "refresh_token",
+        "password",
+        "subscription_authorization_token",
+        "implicit",
+        "subscription_token_exchange_v2"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ],
+      "RedirectUris": [
+        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost:8081",
+        "http://localhost:5000/#!/",
+        "http://localhost:4200/",
+        "http://localhost:4200/#/view/authentication-confirmation/?"
+      ],
+      "AllowedCorsOrigins": [
+        "http://localhost:8081",
+        "http://localhost:5000",
+        "http://localhost:4200"
+      ],
+      "RequireConsent": false,
+      "AllowAccessTokensViaBrowser": true
+    },
+    {
+      "ClientId": "subscription-client",
+      "ClientName": "Nuxeo Repository Subscription",
+      "AllowedScopes": [
+        "openid",
+        "profile",
+        "hxp",
+        "hxpr",
+        "iam.permissions.bulk",
+        "profile.attributes",
+        "environment_authorization"
+      ],
+      "AllowedGrantTypes": [
+        "client_credentials",
+        "subscription_token_exchange_v2",
+        "urn:hyland:params:oauth:grant-type:subscription-token-exchange-v3"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ],
+      "RequireConsent": false
+    },
+    {
+      "ClientId": "hxts-testing-client",
+      "ClientName": "Client for Hxts to test itself",
+      "AllowedScopes": [
+        "profile",
+        "openid",
+        "hxp",
+        "hxts"
+      ],
+      "AllowedGrantTypes": [
+        "refresh_token",
+        "password"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ],
+      "RedirectUris": [
+        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost:8081",
+        "http://localhost:5000/#!/",
+        "http://localhost:4200/",
+        "http://localhost:4200/#/view/authentication-confirmation/?",
+        "http://localhost:8098"
+      ],
+      "AllowedCorsOrigins": [
+        "http://localhost:8081",
+        "http://localhost:5000",
+        "http://localhost:4200",
+        "http://localhost:8098"
+      ],
+      "RequireConsent": false,
+      "AllowAccessTokensViaBrowser": true
+    },
+    {
+      "ClientId": "hxpr-client",
+      "ClientName": "Hxpr client for passing on hxpr token to Hxts",
+      "AllowedScopes": [
+        "profile",
+        "openid",
+        "hxp",
+        "hxpr"
+      ],
+      "AllowedGrantTypes": [
+        "refresh_token",
+        "password"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ],
+      "RedirectUris": [
+        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost:8081",
+        "http://localhost:5000/#!/",
+        "http://localhost:4200/",
+        "http://localhost:4200/#/view/authentication-confirmation/?",
+        "http://localhost:8098"
+      ],
+      "AllowedCorsOrigins": [
+        "http://localhost:8081",
+        "http://localhost:5000",
+        "http://localhost:4200",
+        "http://localhost:8098"
+      ],
+      "RequireConsent": false,
+      "AllowAccessTokensViaBrowser": true
+    },
+    {
+      "ClientId": "hxts-server-client",
+      "ClientName": "Hxts server client",
+      "AllowedScopes": [
+        "profile",
+        "openid",
+        "hxp"
+      ],
+      "AllowedGrantTypes": [
+        "subscription_token_exchange_v2"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ]
+    },
+    {
+      "ClientId": "hxpr-internal-api-client",
+      "ClientName": "Hxpr client for passing on hxpr token to other HxPR pods",
+      "AllowedScopes": [
+        "hxpr"
+      ],
+      "AllowedGrantTypes": [
+        "client_credentials"
+      ],
+      "ClientSecrets": [
+        {
+          "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+          "Type": "SharedSecret"
+        }
+      ]
+    }
+  ],
+  "InternalServiceClients": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "ClientId": "hxpr-hxts-client",
+      "ClientSecrets": [
+        {
+          "Value": "notsosecret",
+          "Type": "SharedSecret"
+        }
+      ],
+      "ClientName": "Hxpr Internal Service Client",
+      "UserId": "f15d0e1d-3d4b-4b72-84cd-31c54d2a634e",
+      "AllowedScopes": [
+        "hxp",
+        "environment_authorization"
+      ],
+      "EnvironmentId": "5714d708-b092-7430-3f8d-583f4bdca222",
+      "AppKey": "hxts"
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "ClientId": "idp-hxpr-client",
+      "ClientSecrets": [
+        {
+          "Value": "notsosecret",
+          "Type": "SharedSecret"
+        }
+      ],
+      "ClientName": "IDP Internal Service Client",
+      "UserId": "b5a5f83a-6026-40c4-9ea2-e0e6acff8c79",
+      "AllowedScopes": [
+        "hxp",
+        "hxpr",
+        "environment_authorization",
+        "iam.user-data.account",
+        "system-integrations-config",
+        "system-integrations-runtime"
+      ],
+      "EnvironmentId": "5714d708-b092-7430-3f8d-583f4bdca222",
+      "AppKey": "hxpr"
+    }
+  ],
+  "InternalServiceUsers": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Id": "f15d0e1d-3d4b-4b72-84cd-31c54d2a634e",
+      "UserName": "hxpr-internal-service-user"
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Id": "b5a5f83a-6026-40c4-9ea2-e0e6acff8c79",
+      "UserName": "idp-internal-service-user"
+    }
+  ],
+  "AccountClients": [
+    {
+      "ClientId": "hxp:iam:accountclients:service:hxpr",
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "ServiceUserName": "service-user-1",
+      "ClientName": "HxPR Service Client",
+      "ClientSecrets": [ { "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=" } ],
+      "Profile": "Service"
+    }
+  ],
+  "Users": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "tiry",
+      "Password": "password",
+      "Email": "tiry.delprat@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "tiry"
+        },
+        {
+          "Type": "given_name",
+          "Value": "Thierry"
+        },
+        {
+          "Type": "family_name",
+          "Value": "Delprat"
+        },
+        {
+          "Type": "email",
+          "Value": "tiry.delprat@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "nelson",
+      "Password": "password",
+      "Email": "nelson.silva@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "nelson"
+        },
+        {
+          "Type": "given_name",
+          "Value": "Nelson"
+        },
+        {
+          "Type": "family_name",
+          "Value": "Silva"
+        },
+        {
+          "Type": "email",
+          "Value": "nelson.silva@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "jchan",
+      "Password": "password",
+      "Email": "jacky.chan@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "jchan"
+        },
+        {
+          "Type": "given_name",
+          "Value": "Jacky"
+        },
+        {
+          "Type": "family_name",
+          "Value": "Chan"
+        },
+        {
+          "Type": "email",
+          "Value": "jacky.chan@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "6714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Id": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+      "UserName": "testuser",
+      "Password": "password",
+      "Email": "test.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "testuser"
+        },
+        {
+          "Type": "given_name",
+          "Value": "Test"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "test.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ],
+      "AttributeValues": [
+        {
+          "AttributeKey": "empId",
+          "StringValue": "E443336-3675"
+        },
+        {
+          "AttributeKey": "favouriteColor",
+          "StringValue": "beige"
+        },
+        {
+          "AttributeKey": "YOJ",
+          "StringValue": "2013"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "john",
+      "Password": "password",
+      "Email": "john.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "john"
+        },
+        {
+          "Type": "given_name",
+          "Value": "john"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "john.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Id": "ff7b0360-3594-416c-b587-2fa4dd0839ce",
+      "UserName": "tester",
+      "Password": "password",
+      "Email": "test.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "tester"
+        },
+        {
+          "Type": "given_name",
+          "Value": "Test"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "test.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "viewer",
+      "Password": "password",
+      "Email": "viewer.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "viewer"
+        },
+        {
+          "Type": "given_name",
+          "Value": "viewer"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "viewer.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "tclient",
+      "Password": "password",
+      "Email": "tclient.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "tclient"
+        },
+        {
+          "Type": "given_name",
+          "Value": "tclient"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "tclient.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserName": "accessor",
+      "Password": "password",
+      "Email": "accessor.user@hyland.com",
+      "Claims": [
+        {
+          "Type": "name",
+          "Value": "accessor"
+        },
+        {
+          "Type": "given_name",
+          "Value": "accessor"
+        },
+        {
+          "Type": "family_name",
+          "Value": "User"
+        },
+        {
+          "Type": "email",
+          "Value": "accessor.user@hyland.com"
+        },
+        {
+          "Type": "hxp_account",
+          "Value": "5714d708-b092-7430-3f8d-583f4bdca247"
+        },
+        {
+          "Type": "hxp_subscription",
+          "Value": "5714d708efcafb48aa21bc94e7eebb2b"
+        }
+      ]
+    }
+  ],
+  "UserAttributes": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Key": "empId",
+      "DisplayName": "empId"
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Key": "favouriteColor",
+      "DisplayName": "favouriteColor"
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Key": "YOJ",
+      "DisplayName": "YOJ"
+    }
+  ],
+  "UserGroups": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "GroupId": "8d6542c9-50e9-4027-aa10-2cfb2179413f",
+      "Name": "members",
+      "Users": [ "tiry", "nelson", "jchan", "testuser", "service-user-1" ],
+      "Roles": [
+        "VIEW_USER"
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "GroupId": "5324ec90-ba1e-4030-8e6a-d815c6f3d4b1",
+      "Name": "administrators",
+      "Users": [ "tiry", "nelson", "testuser", "service-user-1" ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Name": "viewers",
+      "Users": [ "viewer" ],
+      "Roles": [
+        "hxts.viewer"
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Name": "testers",
+      "Users": [ "tester" ],
+      "Roles": [
+        "hxts.tester"
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Name": "tclients",
+      "Users": [ "tclient" ],
+      "Roles": [
+        "hxts.tclient"
+      ]
+    },
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "Name": "accessors",
+      "Users": [ "accessor" ],
+      "Roles": [
+        "hxts.accessor"
+      ]
+    }
+  ],
+  "ApiResources": [
+    {
+      "Name": "hxpr",
+      "Scopes": [ { "Name": "hxpr" } ],
+      "UserClaims": [ "hxp_subscription", "hxp_environment", "role", "permission" ]
+    },
+    {
+      "Name": "hxts",
+      "Scopes": [ { "Name": "hxts" } ],
+      "UserClaims": [ "environment_authorization" ]
+    }
+  ],
+  "Permissions": [
+    {
+      "ApiResourceName": "hxpr",
+      "Key": "hxpr.manage.everything",
+      "Name": "HxPR Manage Everything Permission",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.file.create",
+      "Name": "Create file in Shared File Store",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.file.retrieve",
+      "Name": "Retrieve file from Shared File Store",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.file.delete",
+      "Name": "Delete file from Shared File Store",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.transform.request",
+      "Name": "Request a transform",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.transform.retrieve",
+      "Name": "Retrieve a Transform Request",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.transform.configurate",
+      "Name": "Obtain compatible Transform Values",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.transform.delete",
+      "Name": "Delete a Transform Request",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.viewer.create",
+      "Name": "Create a Document Session",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.viewer.retrieve",
+      "Name": "Retrieve Document Information",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.viewer.export",
+      "Name": "Export a Document",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.viewer.delete",
+      "Name": "Delete a Document Session",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.test.access",
+      "Name": "Access Transform Test Page",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.config.access",
+      "Name": "Access the Transform Service Config",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.ping.access",
+      "Name": "Participate in Pings",
+      "ContextType": "Environment"
+    },
+    {
+      "ApiResourceName": "hxts",
+      "Key": "hxts.api-docs.access",
+      "Name": "Access the Transform Service REST API documentation",
+      "ContextType": "Environment"
+    }
+  ],
+  "Roles": [
+    {
+      "AppKey": "hxprApp",
+      "Key": "VIEW_USER",
+      "Name": "VIEW_USER",
+      "RolePermissions": [
+        "iam.user.list",
+        "iam.usergroup.list"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxprApp",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "members",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Account",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca247"
+          }
+        },
+        {
+          "AppKey": "hxprApp",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "members",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKey": "hxprApp",
+      "Key": "hxpr.administrator",
+      "Name": "HxPR Administrator Role",
+      "RolePermissions": [
+        "hxpr.manage.everything"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxprApp",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "administrators",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKeys": [ "hxts" ],
+      "Name": "REST API Accessor",
+      "Key": "hxts.accessor",
+      "RolePermissions": [
+        "hxts.file.create",
+        "hxts.file.retrieve",
+        "hxts.file.delete",
+        "hxts.transform.request",
+        "hxts.transform.retrieve",
+        "hxts.transform.configurate",
+        "hxts.transform.delete"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxts",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "accessors",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKeys": [ "hxts" ],
+      "Name": "Viewer User",
+      "Key": "hxts.viewer",
+      "RolePermissions": [
+        "hxts.file.create",
+        "hxts.file.retrieve",
+        "hxts.file.delete",
+        "hxts.viewer.create",
+        "hxts.viewer.retrieve",
+        "hxts.viewer.export",
+        "hxts.viewer.delete",
+        "hxts.transform.request",
+        "hxts.transform.retrieve",
+        "hxts.transform.delete"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxts",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "viewers",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKeys": [ "hxts" ],
+      "Name": "Test User",
+      "Key": "hxts.tester",
+      "RolePermissions": [
+        "hxts.file.create",
+        "hxts.file.retrieve",
+        "hxts.file.delete",
+        "hxts.transform.request",
+        "hxts.transform.retrieve",
+        "hxts.transform.configurate",
+        "hxts.transform.delete",
+        "hxts.test.access",
+        "hxts.config.access",
+        "hxts.ping.access",
+        "hxts.api-docs.access"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxts",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "testers",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKeys": [ "hxts" ],
+      "Name": "SDK User",
+      "Key": "hxts.tclient",
+      "RolePermissions": [
+        "hxts.file.create",
+        "hxts.file.retrieve",
+        "hxts.file.delete",
+        "hxts.test.access",
+        "hxts.config.access",
+        "hxts.ping.access",
+        "hxts.transform.request"
+      ],
+      "AppliedRoleUserGroups": [
+        {
+          "AppKey": "hxts",
+          "GroupAccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+          "GroupName": "tclients",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ],
+      "AppliedRoleUsers": [
+        {
+          "AppKey": "hxts",
+          "UserId": "f15d0e1d-3d4b-4b72-84cd-31c54d2a634e",
+          "AppliedAuthorizationContext": {
+            "ContextType": "Environment",
+            "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+          }
+        }
+      ]
+    },
+    {
+      "AppKey": "hxpr",
+      "Name": "IDP Service Users",
+      "Key": "idp.service-users",
+      "RolePermissions": [
+        "iam.user.list",
+        "iam.usergroup.list",
+        "iam.user-attribute.read",
+        "iam.user-attribute-value.read"
+      ]
+    }
+  ],
+  "UserRoleAssignments": [
+    {
+      "AccountId": "5714d708-b092-7430-3f8d-583f4bdca247",
+      "UserId": "b5a5f83a-6026-40c4-9ea2-e0e6acff8c79",
+      "RoleKey": "idp.service-users",
+      "AppKey": "hxpr",
+      "ContextType": "Account",
+      "ContextId": "5714d708-b092-7430-3f8d-583f4bdca222"
+    }
+  ]
+}
