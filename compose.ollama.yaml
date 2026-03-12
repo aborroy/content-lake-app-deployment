@@ -1,0 +1,10 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - stack
+
+volumes:
+  ollama-data:
