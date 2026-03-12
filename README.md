@@ -12,8 +12,8 @@ Self-contained deployment for Alfresco Content Lake.
 The target workflow is:
 
 ```bash
-git clone https://github.com/aborroy/alfresco-content-lake-deploy.git
-cd alfresco-content-lake-deploy
+git clone https://github.com/aborroy/alfresco-content-lake-deployment.git
+cd alfresco-content-lake-deployment
 docker login ghcr.io
 docker compose up --build
 ```
@@ -22,11 +22,11 @@ No sibling `alfresco/`, `hxpr/`, `alfresco-content-lake/`, or ACA checkout is re
 
 ## Compose Layout
 
-The root entrypoint is [compose.yaml](/Users/angel.fernandoborroy/Downloads/zz-hxpr/dev/alfresco-content-lake-deploy/compose.yaml), which uses Docker Compose `include` to pull in:
+The root entrypoint is [compose.yaml](compose.yaml), which uses Docker Compose `include` to pull in:
 
-- [compose.alfresco.yaml](/Users/angel.fernandoborroy/Downloads/zz-hxpr/dev/alfresco-content-lake-deploy/compose.alfresco.yaml)
-- [compose.hxpr.yaml](/Users/angel.fernandoborroy/Downloads/zz-hxpr/dev/alfresco-content-lake-deploy/compose.hxpr.yaml)
-- [compose.rag.yaml](/Users/angel.fernandoborroy/Downloads/zz-hxpr/dev/alfresco-content-lake-deploy/compose.rag.yaml)
+- [compose.alfresco.yaml](compose.alfresco.yaml)
+- [compose.hxpr.yaml](compose.hxpr.yaml)
+- [compose.rag.yaml](compose.rag.yaml)
 
 Shared project name, network, and named volumes stay in the root file.
 
@@ -149,7 +149,7 @@ This repo now vendors the required ACS module/config pieces locally and builds t
 
 These are the GitHub projects directly used by this deployment:
 
-- [`aborroy/alfresco-content-lake-deploy`](https://github.com/aborroy/alfresco-content-lake-deploy)
+- [`aborroy/alfresco-content-lake-deployment`](https://github.com/aborroy/alfresco-content-lake-deployment)
   This repository. It contains the Compose files, ACS customization, HXPR build wrapper, proxy config, and deployment documentation.
 
 - [`aborroy/alfresco-content-lake`](https://github.com/aborroy/alfresco-content-lake)

@@ -90,8 +90,8 @@ docker compose version
 ## 5. Clone the Repository
 
 ```bash
-git clone https://github.com/aborroy/alfresco-content-lake-deploy.git
-cd alfresco-content-lake-deploy
+git clone https://github.com/aborroy/alfresco-content-lake-deployment.git
+cd alfresco-content-lake-deployment
 ```
 
 ---
