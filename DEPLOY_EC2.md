@@ -2,7 +2,7 @@
 
 This guide covers deploying the full stack on an **r6i.xlarge** (4 vCPU / 32 GB RAM) running Ubuntu.
 
-Docker Model Runner is not available on Linux Docker Engine, so this guide uses [Ollama](https://ollama.com) as a drop-in replacement, defined in `compose.ollama.yaml`. All make commands use the `-ollama` variant targets.
+The same Docker Model Runner used on Docker Desktop is also available on Linux via the `docker-model-plugin` package, keeping deployment assets and make commands identical across environments. The only Linux-specific difference is setting `MODEL_RUNNER_URL` to `http://host.docker.internal:12434` in `.env.local` — the port Docker Model Runner binds to on Linux. The `host.docker.internal:host-gateway` mapping is already embedded in `compose.rag.yaml` so no extra compose file is needed.
 
 ---
 
@@ -70,11 +70,12 @@ echo \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker Engine and Compose plugin
+# Install Docker Engine, Compose plugin, and Model Runner plugin
 sudo apt-get update
 sudo apt-get install -y \
   docker-ce docker-ce-cli containerd.io \
-  docker-buildx-plugin docker-compose-plugin
+  docker-buildx-plugin docker-compose-plugin \
+  docker-model-plugin
 
 # Allow running Docker without sudo
 sudo usermod -aG docker $USER
@@ -83,11 +84,23 @@ newgrp docker
 # Verify
 docker version
 docker compose version
+docker model version
 ```
 
 ---
 
-## 5. Clone the Repository
+## 5. Pull the AI Models
+
+Pull the models before starting the full stack so the AI services find them ready on first startup.
+
+```bash
+docker model pull ai/mxbai-embed-large
+docker model pull ai/gpt-oss
+```
+
+---
+
+## 6. Clone the Repository
 
 ```bash
 git clone https://github.com/aborroy/alfresco-content-lake-deployment.git
@@ -96,7 +109,7 @@ cd alfresco-content-lake-deployment
 
 ---
 
-## 6. Authenticate to Container Registries
+## 7. Authenticate to Container Registries
 
 The HXPR images are hosted on `ghcr.io`.
 
@@ -106,28 +119,25 @@ docker login ghcr.io
 
 ---
 
-## 7. Create `.env.local`
+## 8. Create `.env.local`
 
-Create `.env.local` to override the defaults for this EC2 deployment.
-Replace `<EC2_PUBLIC_IP>` with the actual public IP (or DNS name) of your instance.
+Create `.env.local` to override the defaults for this EC2 deployment. Replace `<EC2_PUBLIC_IP>` with the actual public IP (or DNS name) of your instance.
 
 ```bash
 cat > .env.local << 'EOF'
 SERVER_NAME=<EC2_PUBLIC_IP>
 
-# Ollama replaces Docker Model Runner
-MODEL_RUNNER_URL=http://ollama:11434
-EMBEDDING_MODEL=mxbai-embed-large
-LLM_MODEL=gpt-oss
+# Docker Model Runner on Linux binds to port 12434 on the host.
+# Containers reach it via host.docker.internal (mapped by compose.host-gateway.yaml).
+MODEL_RUNNER_URL=http://host.docker.internal:12434
 EOF
 ```
 
-> **Model note:** `gpt-oss` and `mxbai-embed-large` map 1:1 from `ai/gpt-oss` and `ai/mxbai-embed-large`.
-> A `gpt-oss:120b` variant exists but requires far more RAM than the r6i.xlarge provides — stick with the default tag.
+> `EMBEDDING_MODEL` and `LLM_MODEL` are unchanged — `ai/mxbai-embed-large` and `ai/gpt-oss` are the same model names on Linux as on Docker Desktop.
 
 ---
 
-## 8. Export Build Credentials
+## 9. Export Build Credentials
 
 These are required to build the HXPR image. Export them in your shell before starting the stack.
 
@@ -145,46 +155,33 @@ See the [Getting Credentials](README.md#getting-credentials) section in the main
 
 ---
 
-## 9. Start the Stack
-
-### 9a. Bring up Ollama first and pull the models
-
-Pull the models before starting the full stack so the AI services find them ready on first startup.
-
-```bash
-make ollama-start
-make ollama-pull
-```
-
-### 9b. Build and start the full stack
+## 10. Build and Start the Stack
 
 The initial build compiles several Java projects from source; it will take several minutes.
 
 ```bash
-make up-ollama
+make up
 ```
 
 ---
 
-## 10. Monitor Startup
-
-The stack is fully ready when all services report `healthy` or `running`:
+## 11. Monitor Startup
 
 ```bash
-make ps-ollama
+make ps
 ```
 
 Follow logs for all services:
 
 ```bash
-make logs-ollama
+make logs
 ```
 
 `hxpr-app` has a 120-second start period; expect the stack to take 3–5 minutes to fully stabilise.
 
 ---
 
-## 11. Public Endpoints
+## 12. Public Endpoints
 
 Replace `<EC2_PUBLIC_IP>` with your instance's IP or DNS name.
 
@@ -202,22 +199,22 @@ Default Alfresco credentials: `admin` / `admin`.
 
 ---
 
-## 12. Day-to-Day Commands
+## 13. Day-to-Day Commands
 
 ```bash
-make down-ollama    # stop and remove containers (preserves volumes)
-make up-ollama      # start again (images already built, skips rebuild)
-make logs-ollama    # tail all logs
-make ps-ollama      # show service status
-make clean-ollama   # ⚠️  remove containers AND all volumes (destructive)
+make down     # stop and remove containers (preserves volumes)
+make up       # start again (images already built, skips rebuild)
+make logs     # tail all logs
+make ps       # show service status
+make clean    # ⚠️  remove containers AND all volumes (destructive)
 ```
 
 ---
 
-## 13. Saving Costs
+## 14. Saving Costs
 
 - **Stop the EC2 instance** when not in use — you are only charged for storage while stopped (~$0.10/GB/month for gp3).
-- **EBS volumes persist** across instance stops, so your Alfresco data, Solr index, MongoDB, and pulled Ollama models are retained.
+- **EBS volumes persist** across instance stops, so Alfresco data, Solr index, MongoDB, and pulled model weights are all retained.
 - Use an **Elastic IP** if you stop/start frequently, otherwise the public IP changes each time and you will need to update `SERVER_NAME` in `.env.local`.
 
 ```bash

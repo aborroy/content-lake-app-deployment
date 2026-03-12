@@ -49,6 +49,8 @@ services:
       TRANSFORM_URL: http://transform-core-aio:8090
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://model-runner.docker.internal}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       alfresco:
         condition: service_healthy
@@ -111,6 +113,8 @@ services:
       TRANSFORM_URL: http://transform-core-aio:8090
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://model-runner.docker.internal}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       alfresco:
         condition: service_healthy
@@ -175,6 +179,8 @@ services:
       RAG_DEFAULT_TOP_K: "5"
       RAG_DEFAULT_MIN_SCORE: "0.5"
       RAG_MAX_CONTEXT_LENGTH: "12000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       alfresco:
         condition: service_healthy

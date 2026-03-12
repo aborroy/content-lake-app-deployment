@@ -171,9 +171,7 @@ These are the GitHub projects directly used by this deployment:
 ## Prerequisites
 
 - Docker Desktop with Docker Compose v2
-- LLM inference backend, one of:
-  - *Docker Model Runner* (default): enable it in Docker Desktop settings
-  - *Ollama* (Linux): see [Using Ollama instead of Docker Model Runner](#using-ollama-instead-of-docker-model-runner)
+- Docker Model Runner — enable it in Docker Desktop settings, or install `docker-model-plugin` on Linux
 - Access to `ghcr.io` for Hyland images
 - Outbound access to GitHub so BuildKit can fetch the remote source contexts
 - HXPR build credentials:
@@ -295,12 +293,9 @@ The most important overrides are:
 - `PUBLIC_PORT` — defaults to `8080`.
 - `MODEL_RUNNER_URL`, `EMBEDDING_MODEL`, `LLM_MODEL` — control the LLM inference backend.
   The default points to Docker Model Runner (`http://model-runner.docker.internal`).
-  Spring AI appends `/v1/...` itself. To use Ollama instead, see
-  [Using Ollama instead of Docker Model Runner](#using-ollama-instead-of-docker-model-runner).
+  Spring AI appends `/v1/...` itself. On Linux, override to `http://host.docker.internal:12434` in `.env.local`.
 
 ## Day-To-Day Commands
-
-With Docker Model Runner (default)
 
 ```bash
 make up       # build and start (auto-loads .env.local if present)
@@ -310,43 +305,11 @@ make ps       # show running services
 make config   # render the resolved compose configuration
 ```
 
-With Ollama
-
-```bash
-make up-ollama      # build and start with Ollama
-make down-ollama    # stop and remove containers
-make logs-ollama    # follow logs for all services
-make ps-ollama      # show running services
-```
-
-You can also use `docker compose` directly; remember to add
-`--env-file .env.local` if you have local overrides.
-
-## Using Ollama instead of Docker Model Runner
-
-[Ollama](https://ollama.com) is an alternative LLM backend supported by this stack via `compose.ollama.yaml`. It is the recommended option on Linux hosts where Docker Model Runner is not available (e.g. AWS EC2).
-
-Add the following overrides to your `.env.local`:
-
-```bash
-MODEL_RUNNER_URL=http://ollama:11434
-EMBEDDING_MODEL=mxbai-embed-large
-LLM_MODEL=gpt-oss
-```
-
-Then start Ollama, pull the models, and bring up the full stack:
-
-```bash
-make ollama-start
-make ollama-pull
-make up-ollama
-```
-
-`ollama-pull` fetches `mxbai-embed-large` and `gpt-oss` — the direct Ollama equivalents of the default `ai/mxbai-embed-large` and `ai/gpt-oss` Docker Model Runner models.
+You can also use `docker compose` directly; remember to add `--env-file .env.local` if you have local overrides.
 
 ## Deploying to AWS EC2
 
-See [DEPLOY_EC2.md](DEPLOY_EC2.md) for a step-by-step guide to running the full stack on an `r6i.xlarge` (4 vCPU / 32 GB RAM) Ubuntu instance, including Docker Engine installation,Ollama setup, and cost-saving tips.
+See [DEPLOY_EC2.md](DEPLOY_EC2.md) for a step-by-step guide to running the full stack on an `r6i.xlarge` (4 vCPU / 32 GB RAM) Ubuntu instance, including Docker Engine and Docker Model Runner installation, and cost-saving tips.
 
 ## Notes
 
