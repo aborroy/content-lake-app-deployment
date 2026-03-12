@@ -149,7 +149,7 @@ services:
     environment:
       APP_CONFIG_ECM_HOST: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-8080}
       APP_CONFIG_AUTH_TYPE: BASIC
-      APP_CONFIG_ACTIVITI_ENABLED: "false"
+      APP_CONFIG_PROVIDER: ECM
       BASE_PATH: /admin
     depends_on:
       alfresco:
