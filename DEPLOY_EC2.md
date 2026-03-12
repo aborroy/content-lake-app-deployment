@@ -1,8 +1,8 @@
 # Deploying to AWS EC2
 
-This guide covers deploying the full stack on an **r6i.xlarge** (4 vCPU / 32 GB RAM) running Ubuntu.
+This guide covers deploying the full stack on a **g4dn.xlarge** (4 vCPU / 16 GB RAM / NVIDIA T4 GPU) running Ubuntu.
 
-The same Docker Model Runner used on Docker Desktop is also available on Linux via the `docker-model-plugin` package, keeping deployment assets and make commands identical across environments. The only Linux-specific difference is setting `MODEL_RUNNER_URL` to `http://host.docker.internal:12434` in `.env.local` — the port Docker Model Runner binds to on Linux. The `host.docker.internal:host-gateway` mapping is already embedded in `compose.rag.yaml` so no extra compose file is needed.
+The same Docker Model Runner used on Docker Desktop is also available on Linux via the `docker-model-plugin` package, keeping deployment assets and make commands identical across environments. On a GPU instance, Docker Model Runner automatically uses the T4 for inference, giving dramatically faster embedding and LLM response times compared to CPU-only instances. The only Linux-specific difference is setting `MODEL_RUNNER_URL` to `http://host.docker.internal:12434` in `.env.local` — the port Docker Model Runner binds to on Linux. The `host.docker.internal:host-gateway` mapping is already embedded in `compose.rag.yaml` so no extra compose file is needed.
 
 ---
 
@@ -13,7 +13,7 @@ In the AWS Console (or CLI), launch an instance with these settings:
 | Setting | Value |
 |---|---|
 | AMI | Ubuntu Server 24.04 LTS (HVM), 64-bit x86 |
-| Instance type | `r6i.xlarge` |
+| Instance type | `g4dn.xlarge` |
 | Key pair | Create or select an existing key pair |
 | Storage | 150 GiB gp3 (delete on termination: your choice) |
 
@@ -54,7 +54,52 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 ---
 
-## 4. Install Docker Engine
+## 4. Install NVIDIA Drivers and Container Toolkit
+
+Docker Model Runner requires the NVIDIA kernel driver and the NVIDIA Container Toolkit to pass the GPU through to containers.
+
+```bash
+# Install the NVIDIA kernel driver
+sudo apt-get install -y nvidia-driver-535
+```
+
+> A reboot is required after driver installation before the GPU is usable.
+
+```bash
+sudo reboot
+```
+
+Reconnect after the reboot:
+
+```bash
+ssh -i /path/to/your-key.pem ubuntu@<EC2_PUBLIC_IP>
+```
+
+Verify the driver is loaded:
+
+```bash
+nvidia-smi
+```
+
+You should see the T4 listed with driver version and CUDA version.
+
+Now install the NVIDIA Container Toolkit so Docker can access the GPU:
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+```
+
+---
+
+## 5. Install Docker Engine
 
 ```bash
 # Add Docker's GPG key and repository
@@ -77,6 +122,10 @@ sudo apt-get install -y \
   docker-buildx-plugin docker-compose-plugin \
   docker-model-plugin
 
+# Register the NVIDIA runtime with Docker
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
 # Allow running Docker without sudo
 sudo usermod -aG docker $USER
 newgrp docker
@@ -89,9 +138,9 @@ docker model version
 
 ---
 
-## 5. Pull the AI Models
+## 6. Pull the AI Models
 
-Pull the models before starting the full stack so the AI services find them ready on first startup.
+Pull the models before starting the full stack so the AI services find them ready on first startup. Docker Model Runner will use the T4 GPU automatically.
 
 ```bash
 docker model pull ai/mxbai-embed-large
@@ -100,7 +149,7 @@ docker model pull ai/gpt-oss
 
 ---
 
-## 6. Clone the Repository
+## 7. Clone the Repository
 
 ```bash
 git clone https://github.com/aborroy/alfresco-content-lake-deployment.git
@@ -109,7 +158,7 @@ cd alfresco-content-lake-deployment
 
 ---
 
-## 7. Authenticate to Container Registries
+## 8. Authenticate to Container Registries
 
 The HXPR images are hosted on `ghcr.io`.
 
@@ -119,7 +168,7 @@ docker login ghcr.io
 
 ---
 
-## 8. Create `.env.local`
+## 9. Create `.env.local`
 
 Create `.env.local` to override the defaults for this EC2 deployment. Replace `<EC2_PUBLIC_IP>` with the actual public IP (or DNS name) of your instance.
 
@@ -128,7 +177,7 @@ cat > .env.local << 'EOF'
 SERVER_NAME=<EC2_PUBLIC_IP>
 
 # Docker Model Runner on Linux binds to port 12434 on the host.
-# Containers reach it via host.docker.internal (mapped by compose.host-gateway.yaml).
+# Containers reach it via host.docker.internal (mapped by compose.rag.yaml).
 MODEL_RUNNER_URL=http://host.docker.internal:12434
 EOF
 ```
@@ -137,7 +186,7 @@ EOF
 
 ---
 
-## 9. Export Build Credentials
+## 10. Export Build Credentials
 
 These are required to build the HXPR image. Export them in your shell before starting the stack.
 
@@ -155,7 +204,7 @@ See the [Getting Credentials](README.md#getting-credentials) section in the main
 
 ---
 
-## 10. Build and Start the Stack
+## 11. Build and Start the Stack
 
 The initial build compiles several Java projects from source; it will take several minutes.
 
@@ -165,7 +214,7 @@ make up
 
 ---
 
-## 11. Monitor Startup
+## 12. Monitor Startup
 
 ```bash
 make ps
@@ -181,7 +230,7 @@ make logs
 
 ---
 
-## 12. Public Endpoints
+## 13. Public Endpoints
 
 Replace `<EC2_PUBLIC_IP>` with your instance's IP or DNS name.
 
@@ -199,7 +248,7 @@ Default Alfresco credentials: `admin` / `admin`.
 
 ---
 
-## 13. Day-to-Day Commands
+## 14. Day-to-Day Commands
 
 ```bash
 make down     # stop and remove containers (preserves volumes)
@@ -211,7 +260,7 @@ make clean    # ⚠️  remove containers AND all volumes (destructive)
 
 ---
 
-## 14. Saving Costs
+## 15. Saving Costs
 
 - **Stop the EC2 instance** when not in use — you are only charged for storage while stopped (~$0.10/GB/month for gp3).
 - **EBS volumes persist** across instance stops, so Alfresco data, Solr index, MongoDB, and pulled model weights are all retained.
