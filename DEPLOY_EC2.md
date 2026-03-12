@@ -131,12 +131,23 @@ Pull the models before starting the full stack so the AI services find them read
 
 ```bash
 docker model pull ai/mxbai-embed-large
-docker model pull ai/mistral
+docker model pull ai/qwen2.5
 ```
 
-> **Model choice on g4dn.xlarge (T4, 15 GB VRAM):** `ai/gpt-oss` is a ~13 GB reasoning model that leaves almost no headroom alongside the embedding model (~0.7 GB). On a T4 this causes the model runner to evict one model when the other is needed, adding a 3–5 minute cold-start penalty to every RAG query. `ai/mistral` (7B Q4, ~4 GB) fits comfortably alongside the embedding model and delivers ~40 tokens/sec on the T4 after the first load (~50 s warm-up).
+> **Model choice on g4dn.xlarge (T4, 15 GB VRAM):** `ai/gpt-oss` is a ~13 GB reasoning model that leaves almost no headroom alongside the embedding model (~0.7 GB). On a T4 this causes the model runner to evict one model when the other is needed, adding a **3–5 minute cold-start penalty** to every RAG query. `ai/qwen2.5` is the recommended default — see benchmarks below.
 >
-> To use `ai/gpt-oss` without cold-start eviction you need at least a **g5.xlarge** (NVIDIA A10G, 24 GB VRAM), which gives both models room to stay resident simultaneously. Pull and set accordingly:
+> **Benchmarks on g4dn.xlarge (T4, warm model):**
+>
+> | Model | Size | tok/s (warm) | Total response (warm) | Cold start |
+> |---|---|---|---|---|
+> | `ai/mistral` (7B Q4) | ~4 GB | ~41 | ~1.3 s | ~50 s |
+> | `ai/qwen2.5` (4B) | ~3 GB | ~41 | **~4 s** | **<5 s** |
+> | `ai/gemma3` (4B) | ~3.5 GB | ~61 | ~3 s | ~50 s |
+> | `ai/gpt-oss` (~13B) | ~13 GB | ~15 | 3–5 min | 3–5 min |
+>
+> `ai/qwen2.5` wins for RAG: comparable throughput to mistral with a near-zero cold start, meaning the model runner does not stall when switching between the embedding model and the LLM within a single query. `ai/gemma3` is faster at inference but its ~50 s cold start negates that advantage in practice.
+>
+> To use `ai/gpt-oss` without cold-start eviction you need at least a **g5.xlarge** (NVIDIA A10G, 24 GB VRAM), which gives both models room to stay resident simultaneously:
 > ```bash
 > docker model pull ai/gpt-oss
 > # In .env.local:
@@ -172,7 +183,7 @@ MODEL_RUNNER_URL=http://host.docker.internal:12434
 EOF
 ```
 
-> `EMBEDDING_MODEL` is unchanged. `LLM_MODEL` defaults to `ai/mistral` on g4dn.xlarge — see the note in step 6 for model choice guidance.
+> `EMBEDDING_MODEL` is unchanged. `LLM_MODEL` defaults to `ai/qwen2.5` — see the benchmarks in step 6 for model choice guidance.
 
 ## 10. Export Build Credentials
 
