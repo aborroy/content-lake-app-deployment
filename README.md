@@ -237,7 +237,7 @@ Use the following values:
 
    ```bash
    docker model pull ai/mxbai-embed-large
-   docker model pull ai/gpt-oss
+   docker model pull ai/qwen2.5
    ```
 
 5. Start the stack:
@@ -246,18 +246,18 @@ Use the following values:
    docker compose up --build
    ```
 
-Once healthy, open [http://localhost:8080](http://localhost:8080).
+Once healthy, open [http://localhost](http://localhost).
 
 ## Public Endpoints
 
-Only the proxy is published on the host, on port `8080`.
+Only the proxy is published on the host, on port `80`.
 
-- `http://localhost:8080/` - ACA-based Content Lake UI
-- `http://localhost:8080/alfresco/` - Alfresco Repository
-- `http://localhost:8080/share/` - Alfresco Share
-- `http://localhost:8080/admin/` - Alfresco Control Center
-- `http://localhost:8080/api-explorer/` - API Explorer
-- `http://localhost:8080/api/rag/` - RAG service
+- `http://localhost/` - ACA-based Content Lake UI
+- `http://localhost/alfresco/` - Alfresco Repository
+- `http://localhost/share/` - Alfresco Share
+- `http://localhost/admin/` - Alfresco Control Center
+- `http://localhost/api-explorer/` - API Explorer
+- `http://localhost/api/rag/` - RAG service
 - `http://localhost:5601/` - OpenSearch Dashboards
 
 ## Configuration
@@ -290,7 +290,7 @@ The most important overrides are:
 - `CONTENT_LAKE_GIT_CONTEXT` — defaults to `https://github.com/aborroy/alfresco-content-lake.git#main`.
 - `CONTENT_LAKE_UI_GIT_CONTEXT` — defaults to `https://github.com/aborroy/alfresco-content-lake-ui.git#main`.
 - `ACA_TAG` — defaults to `7.3.0`.
-- `PUBLIC_PORT` — defaults to `8080`.
+- `PUBLIC_PORT` — defaults to `80`.
 - `MODEL_RUNNER_URL`, `EMBEDDING_MODEL`, `LLM_MODEL` — control the LLM inference backend.
   The default points to Docker Model Runner (`http://model-runner.docker.internal`).
   Spring AI appends `/v1/...` itself. On Linux, override to `http://host.docker.internal:12434` in `.env.local`.
