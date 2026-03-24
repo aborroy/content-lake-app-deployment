@@ -8,20 +8,22 @@ services:
         WORKDIR /workspace
         COPY pom.xml .
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
-        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-core/pom.xml content-lake-core/pom.xml
+        COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
-        COPY batch-ingester/pom.xml batch-ingester/pom.xml
-        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
+        COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl batch-ingester -am dependency:go-offline
+            mvn -q -DskipTests -pl alfresco-batch-ingester -am dependency:go-offline
         COPY content-lake-spi/src content-lake-spi/src
-        COPY content-lake-common/src content-lake-common/src
-        COPY batch-ingester/src batch-ingester/src
+        COPY content-lake-core/src content-lake-core/src
+        COPY content-lake-source-alfresco/src content-lake-source-alfresco/src
+        COPY alfresco-batch-ingester/src alfresco-batch-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl batch-ingester -am package
+            mvn -q -DskipTests -pl alfresco-batch-ingester -am package
         RUN mkdir -p /layers \
-         && JAR="$$(ls -1 batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+         && JAR="$$(ls -1 alfresco-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
          && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
         FROM eclipse-temurin:21-jre-alpine
         RUN addgroup -S app && adduser -S -G app app
@@ -70,20 +72,22 @@ services:
         WORKDIR /workspace
         COPY pom.xml .
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
-        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-core/pom.xml content-lake-core/pom.xml
+        COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
-        COPY batch-ingester/pom.xml batch-ingester/pom.xml
-        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
+        COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl live-ingester -am dependency:go-offline
+            mvn -q -DskipTests -pl alfresco-live-ingester -am dependency:go-offline
         COPY content-lake-spi/src content-lake-spi/src
-        COPY content-lake-common/src content-lake-common/src
-        COPY live-ingester/src live-ingester/src
+        COPY content-lake-core/src content-lake-core/src
+        COPY content-lake-source-alfresco/src content-lake-source-alfresco/src
+        COPY alfresco-live-ingester/src alfresco-live-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl live-ingester -am package
+            mvn -q -DskipTests -pl alfresco-live-ingester -am package
         RUN mkdir -p /layers \
-         && JAR="$$(ls -1 live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+         && JAR="$$(ls -1 alfresco-live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
          && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
         FROM eclipse-temurin:21-jre-alpine
         RUN addgroup -S app && adduser -S -G app app
@@ -138,15 +142,16 @@ services:
         WORKDIR /workspace
         COPY pom.xml .
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
-        COPY content-lake-common/pom.xml content-lake-common/pom.xml
+        COPY content-lake-core/pom.xml content-lake-core/pom.xml
+        COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
-        COPY batch-ingester/pom.xml batch-ingester/pom.xml
-        COPY live-ingester/pom.xml live-ingester/pom.xml
+        COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
+        COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl rag-service -am dependency:go-offline
         COPY content-lake-spi/src content-lake-spi/src
-        COPY content-lake-common/src content-lake-common/src
+        COPY content-lake-core/src content-lake-core/src
         COPY rag-service/src rag-service/src
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl rag-service -am package
