@@ -26,6 +26,7 @@ The root entrypoint is [compose.yaml](compose.yaml), which uses Docker Compose `
 
 - [compose.alfresco.yaml](compose.alfresco.yaml)
 - [compose.hxpr.yaml](compose.hxpr.yaml)
+- [compose.nuxeo.yaml](compose.nuxeo.yaml)
 - [compose.rag.yaml](compose.rag.yaml)
 
 Shared project name, network, and named volumes stay in the root file.
@@ -257,8 +258,31 @@ Only the proxy is published on the host, on port `80`.
 - `http://localhost/share/` - Alfresco Share
 - `http://localhost/admin/` - Alfresco Control Center
 - `http://localhost/api-explorer/` - API Explorer
+- `http://localhost/nuxeo/` - Nuxeo Web UI
 - `http://localhost/api/rag/` - RAG service
+- `http://localhost/api/sync/` - Sync API. Defaults to Alfresco; use `?sourceType=nuxeo` to route to the Nuxeo batch ingester.
 - `http://localhost:5601/` - OpenSearch Dashboards
+
+## Nuxeo Demo Content
+
+If you want a known-good sample file in the local Nuxeo stack without going through the Web UI,
+use [scripts/create-nuxeo-demo-file.sh](scripts/create-nuxeo-demo-file.sh):
+
+```bash
+./scripts/create-nuxeo-demo-file.sh
+./scripts/create-nuxeo-demo-file.sh --title "Quarterly Notes" --text $'Line 1\nLine 2'
+./scripts/create-nuxeo-demo-file.sh --input-file README.md --mime-type text/markdown
+```
+
+The helper creates the demo workspace if needed and attaches the blob through the
+`Blob.AttachOnDocument` automation endpoint. That path is currently more reliable in this local
+`nuxeo:latest` image than the batch upload API for demo seeding.
+
+To verify indexing through the shared proxy afterwards:
+
+```bash
+curl -u Administrator:Administrator -X POST 'http://localhost/api/sync/configured?sourceType=nuxeo'
+```
 
 ## Configuration
 

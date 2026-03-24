@@ -3,6 +3,7 @@ name: alfresco-content-lake
 include:
   - ./compose.alfresco.yaml
   - ./compose.hxpr.yaml
+  - ./compose.nuxeo.yaml
   - ./compose.rag.yaml
 
 networks:
@@ -16,6 +17,9 @@ volumes:
   mongodb-data:
   localstack-data:
   shared-file-store:
+  nuxeo-db-data:
+  nuxeo-data:
+  nuxeo-config:
 
 secrets:
   hxpr_git_auth_token:

@@ -1,0 +1,35 @@
+services:
+  nuxeo-db:
+    image: postgres:12-alpine
+    environment:
+      POSTGRES_PASSWORD: nuxeo
+      POSTGRES_USER: nuxeo
+      POSTGRES_DB: nuxeo
+    volumes:
+      - nuxeo-db-data:/var/lib/postgresql/data
+    networks:
+      - stack
+
+  nuxeo:
+    image: nuxeo:latest
+    platform: linux/amd64
+    depends_on:
+      - nuxeo-db
+    environment:
+      NUXEO_DB_NAME: nuxeo
+      NUXEO_DB_USER: nuxeo
+      NUXEO_DB_PWD: nuxeo
+      NUXEO_DB_HOST: nuxeo-db
+      NUXEO_DB_PORT: 5432
+      NUXEO_DB_TYPE: postgresql
+      NUXEO_PACKAGES: "nuxeo-web-ui"
+      NUXEO_DEV: "true"
+      NUXEO_FORCE_CONF: "true"
+      NUXEO_CUSTOM_PARAM: |-
+        nuxeo.stream.audit.enabled=false
+        audit.elasticsearch.enabled=false
+    volumes:
+      - nuxeo-data:/var/lib/nuxeo
+      - nuxeo-config:/etc/nuxeo
+    networks:
+      - stack

@@ -64,14 +64,14 @@
         }
       ],
       "RedirectUris": [
-        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
-        "http://localhost:8081",
+        "http://localhost/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost/nuxeo",
         "http://localhost:5000/#!/",
         "http://localhost:4200/",
         "http://localhost:4200/#/view/authentication-confirmation/?"
       ],
       "AllowedCorsOrigins": [
-        "http://localhost:8081",
+        "http://localhost",
         "http://localhost:5000",
         "http://localhost:4200"
       ],
@@ -123,15 +123,15 @@
         }
       ],
       "RedirectUris": [
-        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
-        "http://localhost:8081",
+        "http://localhost/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost/nuxeo",
         "http://localhost:5000/#!/",
         "http://localhost:4200/",
         "http://localhost:4200/#/view/authentication-confirmation/?",
         "http://localhost:8098"
       ],
       "AllowedCorsOrigins": [
-        "http://localhost:8081",
+        "http://localhost",
         "http://localhost:5000",
         "http://localhost:4200",
         "http://localhost:8098"
@@ -159,15 +159,15 @@
         }
       ],
       "RedirectUris": [
-        "http://127.0.0.1:8080/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
-        "http://localhost:8081",
+        "http://localhost/nuxeo/ui/?provider=HxPIDP&forceAnonymousLogin=true",
+        "http://localhost/nuxeo",
         "http://localhost:5000/#!/",
         "http://localhost:4200/",
         "http://localhost:4200/#/view/authentication-confirmation/?",
         "http://localhost:8098"
       ],
       "AllowedCorsOrigins": [
-        "http://localhost:8081",
+        "http://localhost",
         "http://localhost:5000",
         "http://localhost:4200",
         "http://localhost:8098"

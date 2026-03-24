@@ -26,7 +26,7 @@ services:
       context: ./acs/alfresco
       args:
         ALFRESCO_TAG: ${ALFRESCO_CE_TAG:-25.3.0}
-        CONTENT_LAKE_GIT_CONTEXT: ${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake.git#main}
+        CONTENT_LAKE_GIT_CONTEXT: ${CONTENT_LAKE_ACS_GIT_CONTEXT:-https://github.com/aborroy/alfresco-content-lake.git#main}
     environment:
       JAVA_TOOL_OPTIONS: >-
         -Dencryption.keystore.type=JCEKS
@@ -172,7 +172,9 @@ services:
       - content-app
       - control-center
       - solr6
+      - nuxeo
       - rag-service
       - batch-ingester
+      - nuxeo-batch-ingester
     networks:
       - stack
