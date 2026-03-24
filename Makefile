@@ -29,12 +29,19 @@ help: ## Show this help
 up: ## Build images (if needed) and start all services
 	$(DC) up --build -d
 	@echo ""
-	@echo "Stack is starting. Key endpoints (once healthy):"
-	@echo "  ACA / Content Lake UI → http://localhost:$${PUBLIC_PORT:-8080}/"
-	@echo "  Alfresco             → http://localhost:$${PUBLIC_PORT:-8080}/alfresco"
-	@echo "  Share                → http://localhost:$${PUBLIC_PORT:-8080}/share"
-	@echo "  Control Center       → http://localhost:$${PUBLIC_PORT:-8080}/admin"
-	@echo "  RAG Service          → http://localhost:$${PUBLIC_PORT:-8080}/api/rag"
+	@set -a; . ./.env; \
+	  if [ -f ./.env.local ]; then . ./.env.local; fi; \
+	  set +a; \
+	  host="$${SERVER_NAME:-localhost}"; \
+	  port="$${PUBLIC_PORT:-80}"; \
+	  base_url="http://$$host"; \
+	  if [ "$$port" != "80" ]; then base_url="$$base_url:$$port"; fi; \
+	  echo "Stack is starting. Key endpoints (once healthy):"; \
+	  echo "  ACA / Content Lake UI → $$base_url/"; \
+	  echo "  Alfresco             → $$base_url/alfresco"; \
+	  echo "  Share                → $$base_url/share"; \
+	  echo "  Control Center       → $$base_url/admin"; \
+	  echo "  RAG Service          → $$base_url/api/rag"
 	@echo ""
 
 down: ## Stop and remove containers (preserves volumes)
