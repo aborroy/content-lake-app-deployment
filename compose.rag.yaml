@@ -7,6 +7,7 @@ services:
         FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
         WORKDIR /workspace
         COPY pom.xml .
+        COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-common/pom.xml content-lake-common/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY batch-ingester/pom.xml batch-ingester/pom.xml
@@ -14,6 +15,7 @@ services:
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl batch-ingester -am dependency:go-offline
+        COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-common/src content-lake-common/src
         COPY batch-ingester/src batch-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
@@ -67,6 +69,7 @@ services:
         FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
         WORKDIR /workspace
         COPY pom.xml .
+        COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-common/pom.xml content-lake-common/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY batch-ingester/pom.xml batch-ingester/pom.xml
@@ -74,6 +77,7 @@ services:
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl live-ingester -am dependency:go-offline
+        COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-common/src content-lake-common/src
         COPY live-ingester/src live-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
@@ -133,6 +137,7 @@ services:
         FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
         WORKDIR /workspace
         COPY pom.xml .
+        COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-common/pom.xml content-lake-common/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY batch-ingester/pom.xml batch-ingester/pom.xml
@@ -140,6 +145,7 @@ services:
         COPY rag-service/pom.xml rag-service/pom.xml
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl rag-service -am dependency:go-offline
+        COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-common/src content-lake-common/src
         COPY rag-service/src rag-service/src
         RUN --mount=type=cache,target=/root/.m2 \
