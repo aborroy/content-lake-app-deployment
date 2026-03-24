@@ -10,6 +10,7 @@ services:
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-core/pom.xml content-lake-core/pom.xml
         COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
+        COPY content-lake-source-nuxeo/pom.xml content-lake-source-nuxeo/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
         COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
@@ -19,6 +20,7 @@ services:
         COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-core/src content-lake-core/src
         COPY content-lake-source-alfresco/src content-lake-source-alfresco/src
+        COPY content-lake-source-nuxeo/src content-lake-source-nuxeo/src
         COPY alfresco-batch-ingester/src alfresco-batch-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl alfresco-batch-ingester -am package
@@ -74,6 +76,7 @@ services:
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-core/pom.xml content-lake-core/pom.xml
         COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
+        COPY content-lake-source-nuxeo/pom.xml content-lake-source-nuxeo/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
         COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
@@ -83,6 +86,7 @@ services:
         COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-core/src content-lake-core/src
         COPY content-lake-source-alfresco/src content-lake-source-alfresco/src
+        COPY content-lake-source-nuxeo/src content-lake-source-nuxeo/src
         COPY alfresco-live-ingester/src alfresco-live-ingester/src
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl alfresco-live-ingester -am package
@@ -144,6 +148,7 @@ services:
         COPY content-lake-spi/pom.xml content-lake-spi/pom.xml
         COPY content-lake-core/pom.xml content-lake-core/pom.xml
         COPY content-lake-source-alfresco/pom.xml content-lake-source-alfresco/pom.xml
+        COPY content-lake-source-nuxeo/pom.xml content-lake-source-nuxeo/pom.xml
         COPY content-lake-repo-model/pom.xml content-lake-repo-model/pom.xml
         COPY alfresco-batch-ingester/pom.xml alfresco-batch-ingester/pom.xml
         COPY alfresco-live-ingester/pom.xml alfresco-live-ingester/pom.xml
@@ -152,6 +157,7 @@ services:
             mvn -q -DskipTests -pl rag-service -am dependency:go-offline
         COPY content-lake-spi/src content-lake-spi/src
         COPY content-lake-core/src content-lake-core/src
+        COPY content-lake-source-nuxeo/src content-lake-source-nuxeo/src
         COPY rag-service/src rag-service/src
         RUN --mount=type=cache,target=/root/.m2 \
             mvn -q -DskipTests -pl rag-service -am package
