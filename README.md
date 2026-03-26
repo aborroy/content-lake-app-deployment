@@ -13,12 +13,15 @@ The target workflow is:
 
 ```bash
 git clone https://github.com/aborroy/alfresco-content-lake-deployment.git
+git clone https://github.com/aborroy/nuxeo-deployment.git   # required sibling
 cd alfresco-content-lake-deployment
 docker login ghcr.io
 docker compose up --build
 ```
 
-No sibling `alfresco/`, `hxpr/`, `alfresco-content-lake/`, or ACA checkout is required.
+`nuxeo-deployment` must be cloned as a sibling directory (at `../nuxeo-deployment` relative to this
+repo) because `compose.nuxeo.yaml` uses it as the Docker build context for the Nuxeo service.  No
+other sibling checkout (`alfresco/`, `hxpr/`, `alfresco-content-lake/`, or ACA) is required.
 
 ## Compose Layout
 
@@ -168,6 +171,11 @@ This repo now vendors the required ACS module/config pieces locally and builds t
 
 These are the GitHub projects directly used by this deployment:
 
+- [`aborroy/nuxeo-deployment`](https://github.com/aborroy/nuxeo-deployment)
+  **Required sibling checkout.**  Must be cloned at `../nuxeo-deployment` before running
+  `docker compose up --build`.  Provides the `Dockerfile` and scripts used to build the Nuxeo
+  service image (`nuxeo-deployment:nuxeo-local`) from the public `nuxeo/nuxeo` source tree.
+
 - [`aborroy/alfresco-content-lake-deployment`](https://github.com/aborroy/alfresco-content-lake-deployment)
   This repository. It contains the Compose files, ACS customization, HXPR build wrapper, proxy config, and deployment documentation.
 
@@ -189,6 +197,7 @@ These are the GitHub projects directly used by this deployment:
 
 ## Prerequisites
 
+- `nuxeo-deployment` repository cloned at `../nuxeo-deployment` (sibling of this repo)
 - Docker Desktop with Docker Compose v2
 - Docker Model Runner — enable it in Docker Desktop settings, or install `docker-model-plugin` on Linux
 - Access to `ghcr.io` for Hyland images
@@ -233,15 +242,24 @@ Use the following values:
 
 ## First Run
 
-1. Authenticate to GitHub Container Registry:
+1. Clone the `nuxeo-deployment` companion project as a sibling of this repo:
+
+   ```bash
+   git clone https://github.com/aborroy/nuxeo-deployment.git ../nuxeo-deployment
+   ```
+
+   `compose.nuxeo.yaml` references `../nuxeo-deployment` as the Docker build context for the Nuxeo
+   service.  The build will fail if that directory is absent.
+
+2. Authenticate to GitHub Container Registry:
 
    ```bash
    docker login ghcr.io
    ```
 
-2. Enable Docker Model Runner in Docker Desktop.
+3. Enable Docker Model Runner in Docker Desktop.
 
-3. Export the HXPR build credentials:
+4. Export the HXPR build credentials:
 
    ```bash
    export MAVEN_USERNAME=...
@@ -252,14 +270,14 @@ Use the following values:
    export HXPR_GIT_AUTH_TOKEN=...
    ```
 
-4. Pull the models once:
+5. Pull the models once:
 
    ```bash
    docker model pull ai/mxbai-embed-large
    docker model pull ai/qwen2.5
    ```
 
-5. Start the stack:
+6. Start the stack:
 
    ```bash
    docker compose up --build

@@ -1,20 +1,41 @@
+# Nuxeo is built from the nuxeo-deployment companion project located at ../nuxeo-deployment.
+# `docker compose up --build` in this directory will build the image from that source tree.
+# See nuxeo-deployment/README.md for the build contract and pinned upstream ref.
+
 services:
   nuxeo-db:
-    image: postgres:12-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_PASSWORD: nuxeo
       POSTGRES_USER: nuxeo
       POSTGRES_DB: nuxeo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nuxeo -d nuxeo"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     volumes:
       - nuxeo-db-data:/var/lib/postgresql/data
     networks:
       - stack
 
   nuxeo:
-    image: nuxeo:latest
+    build:
+      context: ../nuxeo-deployment
+      dockerfile: Dockerfile
+      args:
+        NUXEO_GIT_TRACK: ${NUXEO_GIT_TRACK}
+        NUXEO_GIT_REF: ${NUXEO_GIT_REF}
+        NUXEO_SOURCE_ARCHIVE_URL: ${NUXEO_SOURCE_ARCHIVE_URL}
+        NUXEO_BUILD_THREADS: ${NUXEO_BUILD_THREADS:-6}
+        NUXEO_WEBUI_GIT_REF: ${NUXEO_WEBUI_GIT_REF}
+        NUXEO_WEBUI_VERSION: ${NUXEO_WEBUI_VERSION}
+    image: nuxeo-deployment:nuxeo-local
     platform: linux/amd64
     depends_on:
-      - nuxeo-db
+      nuxeo-db:
+        condition: service_healthy
     environment:
       NUXEO_DB_NAME: nuxeo
       NUXEO_DB_USER: nuxeo
@@ -25,6 +46,8 @@ services:
       NUXEO_PACKAGES: "nuxeo-web-ui"
       NUXEO_DEV: "true"
       NUXEO_FORCE_CONF: "true"
+      # Audit stream and Elasticsearch audit are disabled because this stack
+      # does not include an Elasticsearch instance for Nuxeo.
       NUXEO_CUSTOM_PARAM: |-
         nuxeo.stream.audit.enabled=false
         audit.elasticsearch.enabled=false
