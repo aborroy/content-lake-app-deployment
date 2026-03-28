@@ -34,6 +34,15 @@ The root entrypoint is [compose.yaml](compose.yaml), which uses Docker Compose `
 
 Shared project name, network, and named volumes stay in the root file.
 
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [docs/deployment-alfresco.md](docs/deployment-alfresco.md) | Full stack prerequisites, credentials, first run, Alfresco requirements, configuration reference |
+| [docs/deployment-nuxeo.md](docs/deployment-nuxeo.md) | Nuxeo stack setup, REST API reference, scope/auth config, audit live sync |
+| [docs/deployment-rag.md](docs/deployment-rag.md) | RAG service configuration, REST API, security, conversation memory, observability |
+| [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) | Step-by-step guide to running the full stack on AWS EC2 |
+
 ## Service Topology
 
 ```mermaid
@@ -375,7 +384,7 @@ You can also use `docker compose` directly; remember to add `--env-file .env.loc
 
 ## Deploying to AWS EC2
 
-See [DEPLOY_EC2.md](DEPLOY_EC2.md) for a step-by-step guide to running the full stack on an `r6i.xlarge` (4 vCPU / 32 GB RAM) Ubuntu instance, including Docker Engine and Docker Model Runner installation, and cost-saving tips.
+See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running the full stack on an `r6i.xlarge` (4 vCPU / 32 GB RAM) Ubuntu instance, including Docker Engine and Docker Model Runner installation, and cost-saving tips.
 
 ## Notes
 
