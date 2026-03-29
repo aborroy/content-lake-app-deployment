@@ -171,7 +171,7 @@ cleanup() {
   if [[ -n "${CONTENT_FILE:-}" && "${INPUT_FILE:-}" != "$CONTENT_FILE" && -f "$CONTENT_FILE" ]]; then
     rm -f "$CONTENT_FILE"
   fi
-  rm -f "${WORKSPACE_RESPONSE:-}" "${DOCUMENT_RESPONSE:-}" "${ATTACH_RESPONSE:-}" "${VERIFY_RESPONSE:-}"
+  rm -f "${WORKSPACE_RESPONSE:-}" "${DOCUMENT_RESPONSE:-}" "${ATTACH_RESPONSE:-}" "${VERIFY_RESPONSE:-}" "${ACL_RESPONSE:-}"
 }
 trap cleanup EXIT
 
@@ -221,6 +221,38 @@ PY
     fail "Workspace lookup failed (HTTP ${workspace_status}): $(cat "$WORKSPACE_RESPONSE")"
     ;;
 esac
+
+# Grant Everyone Read on the workspace so indexed documents are visible in
+# anonymous RAG search (NodeSyncService maps GROUP_EVERYONE → __Everyone__ in sys_racl).
+# Nuxeo deduplicates ACEs, so this is safe to call on every run.
+workspace_uid="$(json_field "$WORKSPACE_RESPONSE" "uid")"
+everyone_acl_payload="$(
+  WORKSPACE_UID="$workspace_uid" python3 - <<'PY'
+import json, os
+print(json.dumps({
+    "params": {
+        "permission": "Read",
+        "user": "Everyone",
+        "grant": True,
+        "blockInheritance": False,
+    },
+    "input": f"doc:{os.environ['WORKSPACE_UID']}",
+}))
+PY
+)"
+ACL_RESPONSE="$(mktemp)"
+acl_status="$(
+  request_json \
+    "$ACL_RESPONSE" \
+    -X POST \
+    "${BASE_URL}/api/v1/automation/Document.SetACE" \
+    -H 'Content-Type: application/json' \
+    --data "$everyone_acl_payload"
+)"
+# 200 = ACE set/updated, 204 = void response, others are unexpected but non-fatal
+[[ "$acl_status" == "200" || "$acl_status" == "204" ]] || \
+  printf 'Warning: SetACE returned HTTP %s (workspace=%s): %s\n' \
+    "$acl_status" "$workspace_uid" "$(cat "$ACL_RESPONSE")" >&2
 
 document_payload="$(
   TITLE="$TITLE" FILENAME="$FILENAME" python3 - <<'PY'

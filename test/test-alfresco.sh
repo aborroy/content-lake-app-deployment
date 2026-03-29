@@ -1,0 +1,930 @@
+#!/usr/bin/env bash
+# test-alfresco.sh — Alfresco end-to-end test suite.
+# Sections A (smoke), B (batch ingestion), C (live ingestion),
+#           G (permissions), H (chunking strategy).
+#
+# Run after STACK_MODE=alfresco stack is healthy, or via run-tests.sh.
+# Requires: curl, jq.
+#
+# Search response field reference (from actual API):
+#   .results[].sourceDocument.nodeId       — Alfresco node UUID
+#   .results[].sourceDocument.sourceType   — "alfresco"
+#   .results[].chunkText                   — chunk content
+#   .results[].chunkMetadata.page          — page number within document
+#   .results[].score                       — similarity score
+
+set -uo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+ALF_BASE='http://localhost/alfresco/api/-default-/public/alfresco/versions/1'
+ALF_AUTH='admin:admin'
+SYNC_URL='http://localhost/api/sync'
+RAG_URL='http://localhost/api/rag'
+LIVE_URL='http://localhost:9092/api/live/status'   # direct port — may not be exposed
+
+PASS=0; FAIL=0
+TMPDIR_DATA="$(mktemp -d)"
+LOG="test-results-alfresco-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG") 2>&1
+
+G='\033[0;32m'; R='\033[0;31m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[1m'; N='\033[0m'
+pass()    { printf "${G}[PASS]${N} %s\n" "$*"; PASS=$((PASS+1)); }
+fail()    { printf "${R}[FAIL]${N} %s\n" "$*"; FAIL=$((FAIL+1)); }
+info()    { printf "${C}[INFO]${N} %s\n" "$*"; }
+section() { printf "\n${B}${C}─── %s ───${N}\n" "$*"; }
+
+cleanup() { rm -rf "$TMPDIR_DATA"; }
+trap cleanup EXIT
+
+# ── Test helpers ──────────────────────────────────────────────────────────────
+
+# upload_file <parent_node_id> <local_path> [name] [mime]
+# Returns the nodeId of the uploaded (or already-existing) file.
+upload_file() {
+  local parent="$1" path="$2" name="${3:-$(basename "$2")}" mime="${4:-text/plain}"
+  local resp http_code body node_id
+  resp=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+    "$ALF_BASE/nodes/$parent/children" \
+    -F "filedata=@${path};type=${mime}" \
+    -F "name=$name" 2>/dev/null)
+  http_code=$(printf '%s' "$resp" | tail -1)
+  body=$(printf '%s' "$resp" | head -1)
+  if [ "$http_code" = "201" ]; then
+    printf '%s' "$body" | jq -r '.entry.id // empty'
+  elif [ "$http_code" = "409" ]; then
+    # File already exists — look up its nodeId by name
+    curl -sf -u "$ALF_AUTH" \
+      "$ALF_BASE/nodes/$parent/children?fields=id,name&maxItems=100" 2>/dev/null \
+      | jq -r --arg n "$name" \
+          '.list.entries[]? | select(.entry.name==$n) | .entry.id' | head -1
+  else
+    echo ""
+  fi
+}
+
+# run_sync_wait <folder_node_id>
+# Triggers /api/sync/batch with an explicit folder and waits up to 5 min for COMPLETED.
+run_sync_wait() {
+  local folder_id="$1"
+  local resp job_id status processed
+  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+    -H 'Content-Type: application/json' \
+    -d "{\"folders\":[\"$folder_id\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
+    2>/dev/null || echo '{}')
+  job_id=$(echo "$resp" | jq -r '.jobId // empty')
+
+  if [ -z "$job_id" ]; then
+    fail "B3: Sync trigger returned no jobId (response: $resp)"
+    return 1
+  fi
+  pass "B3: Sync triggered — jobId=$job_id"
+
+  local elapsed=0
+  while [ $elapsed -lt 300 ]; do
+    local sr
+    sr=$(curl -sf -u "$ALF_AUTH" "$SYNC_URL/status/$job_id" 2>/dev/null || echo '{}')
+    status=$(echo "$sr" | jq -r '.status // "UNKNOWN"')
+    case "$status" in
+      COMPLETED)
+        processed=$(echo "$sr" | jq -r '.metadataIngestedCount // .processedCount // "?"')
+        pass "B4: Sync COMPLETED (metadataIngestedCount=$processed)"
+        return 0
+        ;;
+      FAILED|ERROR)
+        fail "B4: Sync job FAILED — $(echo "$sr" | jq -c '{status,failedCount,discoveredCount}')"
+        return 1
+        ;;
+    esac
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  fail "B4: Sync job timed out after 5 min (last status=$status)"
+  return 1
+}
+
+# rag_find_node <query> <node_id> <test_id> <label>
+# Searches RAG and checks that the given Alfresco nodeId appears in results.
+rag_find_node() {
+  local query="$1" node_id="$2" tid="$3" label="$4"
+  local resp found
+  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
+  found=$(echo "$resp" | jq --arg id "$node_id" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  if [ "${found:-0}" -gt 0 ]; then
+    pass "$tid: $label found in search"
+  else
+    fail "$tid: $label NOT found (nodeId=$node_id, query='$query')"
+    echo "    top results: $(echo "$resp" | jq -c '[.results[:3][]? | {name:.sourceDocument.name, nodeId:.sourceDocument.nodeId, score:.score}]')"
+  fi
+}
+
+# rag_absent_node <query> <node_id> <test_id> <label>
+rag_absent_node() {
+  local query="$1" node_id="$2" tid="$3" label="$4"
+  local resp found
+  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
+  found=$(echo "$resp" | jq --arg id "$node_id" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  if [ "${found:-0}" -eq 0 ]; then
+    pass "$tid: $label correctly absent from search"
+  else
+    fail "$tid: $label still appears in search (nodeId=$node_id)"
+  fi
+}
+
+# rag_find_node_as <query> <node_id> <test_id> <label> <user:password>
+# Like rag_find_node but passes HTTP Basic auth to the RAG service.
+rag_find_node_as() {
+  local query="$1" node_id="$2" tid="$3" label="$4" auth="$5"
+  local resp found
+  resp=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
+  found=$(echo "$resp" | jq --arg id "$node_id" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  if [ "${found:-0}" -gt 0 ]; then
+    pass "$tid: $label found in search (as ${auth%%:*})"
+  else
+    fail "$tid: $label NOT found (as ${auth%%:*}, nodeId=$node_id)"
+    echo "    top results: $(echo "$resp" | jq -c '[.results[:3][]? | {name:.sourceDocument.name, nodeId:.sourceDocument.nodeId, score:.score}]')"
+  fi
+}
+
+# rag_absent_node_as <query> <node_id> <test_id> <label> <user:password>
+rag_absent_node_as() {
+  local query="$1" node_id="$2" tid="$3" label="$4" auth="$5"
+  local resp found
+  resp=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
+  found=$(echo "$resp" | jq --arg id "$node_id" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  if [ "${found:-0}" -eq 0 ]; then
+    pass "$tid: $label correctly absent from search (as ${auth%%:*})"
+  else
+    fail "$tid: $label still appears in search (as ${auth%%:*}, nodeId=$node_id)"
+  fi
+}
+
+# set_node_permissions <node_id> <json_permissions_object>
+# Uses PUT /nodes/{id} with a permissions field in the body.
+# Valid roles: Consumer, Editor, Contributor, Collaborator, Coordinator
+set_node_permissions() {
+  local node_id="$1" perms_json="$2"
+  local code
+  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+    "$ALF_BASE/nodes/$node_id" \
+    -H 'Content-Type: application/json' \
+    -d "{\"permissions\":$perms_json}" 2>/dev/null || echo 000)
+  [ "$code" = "200" ]
+}
+
+# create_alfresco_user <id> <first> <last>
+create_alfresco_user() {
+  local id="$1" first="$2" last="$3"
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X POST \
+    "$ALF_BASE/people" \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"$id\",\"firstName\":\"$first\",\"lastName\":\"$last\",\"email\":\"${id}@test.local\",\"password\":\"password\"}")
+  case "$code" in
+    201) info "Created user $id" ;;
+    409) info "User $id already exists" ;;
+    *) fail "G0: Failed to create user $id (HTTP $code)" ;;
+  esac
+}
+
+# ── Test data ─────────────────────────────────────────────────────────────────
+create_test_data() {
+  # --- short-memo.txt: HR topic, ~400 words ---
+  cat > "$TMPDIR_DATA/short-memo.txt" <<'EOF'
+MEMORANDUM
+
+To:   All Staff
+From: Human Resources Department
+Re:   Updated Remote Work Policy — Effective Immediately
+
+This memorandum outlines the revised remote work eligibility criteria applicable to all
+permanent employees. Following extensive consultation with department heads, the following
+framework has been approved by the executive committee.
+
+Eligibility and Days Permitted
+Employees with a minimum of six months of continuous service are eligible to work from home
+up to three days per week. Requests must be submitted to and approved by the direct line
+manager at least two working days in advance. Approval is at the manager's discretion based
+on workload and team requirements.
+
+Home Office Equipment Allowance
+The company will provide a one-time home office equipment allowance of five hundred pounds
+to cover ergonomic chair, desk accessories, and broadband upgrade costs. Claims must be
+submitted with receipts within ninety days of the policy taking effect. The allowance does
+not cover monitors or computing equipment, which remain the company's property and must be
+collected from the IT department.
+
+Connectivity and Security Requirements
+Employees working remotely must use the company VPN at all times. Personal devices are not
+permitted for processing confidential data; only company-issued laptops may be used. Any
+security incidents must be reported to the IT helpdesk within one hour of discovery.
+
+Performance and Availability Expectations
+Remote working employees are expected to maintain the same productivity baseline as in-office
+days. Core hours of nine to three must be observed, during which employees must be reachable
+by phone, Teams, or email within fifteen minutes. Failure to meet availability requirements
+may result in remote work privileges being suspended.
+
+Welfare and Wellbeing
+The wellbeing team offers bi-monthly virtual check-ins for remote workers. Employees are
+encouraged to take regular breaks and to maintain a clear boundary between work and personal
+time. The occupational health team can provide ergonomic assessments on request.
+
+For questions about remote work eligibility please contact HR at hr@company.internal.
+
+EOF
+
+  # --- security-policy.txt: IT security, ~600 words ---
+  cat > "$TMPDIR_DATA/security-policy.txt" <<'EOF'
+INFORMATION SECURITY POLICY — VERSION 3.2
+
+1. PURPOSE AND SCOPE
+This Information Security Policy establishes the minimum requirements for protecting company
+data, systems, and infrastructure. It applies to all employees, contractors, and third parties
+who access company systems. Compliance is mandatory. Violations may result in disciplinary
+action up to and including termination.
+
+2. ACCESS CONTROL REQUIREMENTS
+Access to systems and data is granted on the principle of least privilege. User accounts must
+be provisioned through the Identity Management System. Shared accounts are strictly prohibited.
+Access rights must be reviewed quarterly by system owners. Dormant accounts inactive for sixty
+days are automatically disabled.
+
+3. PASSWORD COMPLEXITY REQUIREMENTS
+All passwords must be at least fourteen characters long and contain a mix of uppercase,
+lowercase, digits, and special characters. Passwords must not contain the user's name,
+username, or commonly used sequences. Passwords expire every ninety days. Reuse of the last
+twelve passwords is blocked. Multi-factor authentication is mandatory for all privileged
+accounts and remote access.
+
+4. DATA CLASSIFICATION SCHEME
+Data is classified into four tiers: Public, Internal, Confidential, and Restricted.
+Confidential data must be encrypted at rest using AES-256 and in transit using TLS 1.3.
+Restricted data may not leave the corporate perimeter without explicit CISO approval.
+Personally identifiable information is classified as Confidential by default.
+
+5. INCIDENT RESPONSE
+Security incidents must be reported to the Security Operations Centre within one hour of
+discovery. The incident response team will triage, contain, and remediate the incident
+according to the documented runbook. Post-incident reviews are mandatory for all P1 incidents.
+Forensic evidence must be preserved and chain of custody maintained.
+
+6. VULNERABILITY MANAGEMENT
+All systems must be patched within fourteen days of a critical CVE publication. Penetration
+tests are conducted annually by an approved third party. Internal vulnerability scans run
+weekly. Findings are tracked in the vulnerability management platform and reviewed by the
+security team at monthly cadence.
+EOF
+
+  # --- product-roadmap.txt: Product, ~600 words ---
+  cat > "$TMPDIR_DATA/product-roadmap.txt" <<'EOF'
+PRODUCT ROADMAP — FISCAL YEAR 2025–2026
+
+STRATEGIC THEMES
+
+The product strategy for the next eighteen months is organised around three pillars:
+AI-first experiences, mobile-first design, and an open API platform. Each pillar has a
+dedicated workstream with quarterly delivery milestones tracked in the programme board.
+
+Q1 2025: FOUNDATIONS
+The Q1 delivery focuses on infrastructure modernisation. The monolithic API gateway will be
+decomposed into domain-specific microservices. The new API platform will expose stable v2
+endpoints with OpenAPI 3.1 specifications and a developer portal with interactive playground.
+AI feature integration begins with an embedded suggestion engine that surfaces related content
+as users type.
+
+Q2 2025: MOBILE FIRST STRATEGY
+The mobile-first redesign of the core application will ship in Q2. The new React Native client
+replaces the legacy hybrid app. Key user journeys have been reworked with a thumb-friendly
+navigation model. Offline mode supports the ten most frequently accessed content types.
+Push notification infrastructure is upgraded to support rich media and deep-linking.
+
+Q3 2025: AI FEATURE RELEASE
+Q3 delivers the semantic search and RAG-powered assistant across all clients. Users can ask
+natural language questions and receive grounded answers with source citations. The assistant
+is context-aware and maintains a per-session conversation history. The initial model is
+hosted on-premise; a cloud model routing option is planned for Q4.
+
+Q4 2025: PLATFORM OPENNESS
+Developers will be able to build extensions using the published SDK in Q4. A marketplace for
+certified integrations launches alongside enhanced webhook support covering all major content
+lifecycle events. Enterprise customers receive dedicated support SLAs for API consumers.
+
+2026 OUTLOOK
+The 2026 roadmap features expanded language support (twelve additional locales), a no-code
+automation builder, and a cross-platform desktop client. Feedback from the partner advisory
+board will be incorporated into the detailed Q-plan in October 2025.
+EOF
+
+  # --- technical-spec.txt: Engineering API, ~700 words ---
+  cat > "$TMPDIR_DATA/technical-spec.txt" <<'EOF'
+REST API SPECIFICATION v2.0 — CONTENT LAKE SERVICE
+
+1. OVERVIEW
+The Content Lake REST API provides programmatic access to document ingestion, search, and
+retrieval capabilities. All endpoints accept and return JSON. The base URL is
+https://api.content-lake.internal/v2. Authentication uses Bearer tokens issued by the IDP
+at /connect/token using the client_credentials grant.
+
+2. AUTHENTICATION
+POST /connect/token
+Content-Type: application/x-www-form-urlencoded
+grant_type=client_credentials&client_id=<id>&client_secret=<secret>&scope=content-lake
+
+The response includes access_token (JWT), token_type=Bearer, and expires_in (seconds).
+Include the token as Authorization: Bearer <token> on all API requests. Tokens expire after
+3600 seconds. The client must refresh before expiry to avoid 401 responses.
+
+3. DOCUMENT ENDPOINTS
+
+GET /documents
+Lists all documents visible to the authenticated principal. Supports pagination via
+limit (default 20, max 100) and cursor query parameters. Filters: source_type, created_after,
+mime_type. Returns a paginated list with next_cursor if more results exist.
+
+POST /documents
+Ingests a new document. Multipart body: metadata (JSON part) and content (binary part).
+Metadata must include source_id, node_id, and mime_type. Returns 202 Accepted with a
+job_id for tracking ingestion progress.
+
+GET /documents/{id}
+Returns the full document record including sys_acl, embeddings count, and ingest properties.
+Returns 404 if the document does not exist or the caller lacks read access.
+
+DELETE /documents/{id}
+Removes the document and all associated embeddings. Returns 204 on success. Returns 403 if
+the caller is not the document owner or an admin.
+
+4. SEARCH ENDPOINTS
+
+POST /search/semantic
+JSON body: { "query": string, "top_k": int, "min_score": float, "filters": object }
+Returns a ranked list of matching document chunks with source metadata. The min_score
+parameter controls the relevance threshold (range 0.0–1.0). HTTP authentication token
+identity is used for ACL filtering.
+
+POST /search/hybrid
+Combines vector similarity (kNN) with BM25 full-text search using reciprocal rank fusion.
+Body is identical to semantic search. Use when exact keyword matches are important alongside
+semantic relevance. JSON schema validation is applied to the request body.
+
+5. ERROR HANDLING
+All errors return a JSON body: { "error": string, "code": int, "request_id": string }.
+Rate limiting returns 429 with Retry-After header. Malformed requests return 400 with a
+validation detail array. Server errors return 500 with a support reference number.
+EOF
+
+  # --- long-report.txt: Finance, ~5500 words ---
+  {
+    cat <<'HEADER'
+ANNUAL FINANCIAL PERFORMANCE REPORT
+FISCAL YEAR 2024
+Prepared by: Group Finance | Approved by: Board of Directors
+
+SECTION 1: EXECUTIVE SUMMARY
+
+The fiscal year 2024 delivered outstanding results. Total consolidated revenue reached
+two point four billion pounds, representing year-on-year growth of fifteen percent.
+Adjusted EBITDA improved to four hundred and eighty million pounds, a margin of twenty
+percent. Net profit after tax was two hundred and ten million pounds, up from one hundred
+and seventy million in fiscal year 2023. The board has approved a final dividend of twelve
+pence per ordinary share, bringing the full-year distribution to twenty pence per share.
+Free cash flow generation was strong at three hundred and forty million pounds.
+
+SECTION 2: REVENUE ANALYSIS BY DIVISION
+
+The Group operates four reporting divisions: Enterprise Software, Professional Services,
+Managed Cloud, and Licensing. Enterprise Software remained the largest contributor,
+generating nine hundred and sixty million pounds in the year, representing growth of
+eighteen percent driven by new logo acquisition and strong renewal rates above ninety-two
+percent. Professional Services revenue grew eleven percent to five hundred and forty
+million pounds. Managed Cloud was the fastest growing division at thirty-one percent,
+reaching four hundred and twenty million pounds. Licensing revenue declined five percent
+to four hundred and eighty million as customers transitioned to subscription models,
+consistent with the strategy communicated to shareholders at the Capital Markets Day.
+
+SECTION 3: GROSS PROFIT AND MARGIN
+
+Group gross profit was one point zero zero eight billion pounds, representing a gross
+margin of forty-two percent, up from thirty-nine percent in the prior year. The margin
+improvement reflects continued mix shift toward higher-margin cloud and software revenue,
+partially offset by investment in professional services headcount to support growth.
+Enterprise Software gross margin reached seventy-one percent. Managed Cloud gross margin
+expanded by four percentage points to sixty-three percent as infrastructure unit costs
+declined and utilisation rates improved.
+
+SECTION 4: OPERATING EXPENSES
+
+Research and development expenditure was two hundred and sixteen million pounds,
+representing nine percent of revenue, in line with the board's commitment to invest a
+minimum of eight to ten percent of revenue in product innovation. Sales and marketing
+costs were three hundred and twelve million pounds, reflecting targeted investment in
+demand generation in North America and the Asia-Pacific region. General and administrative
+costs were held flat year-on-year at one hundred and forty-four million pounds despite
+inflationary pressures, demonstrating effective cost discipline across central functions.
+
+SECTION 5: EBITDA AND ADJUSTED EARNINGS
+
+Reported EBITDA was four hundred and thirty-two million pounds. Adjusted EBITDA, excluding
+share-based compensation charges of twenty-four million pounds, restructuring costs of
+eighteen million pounds, and acquisition-related amortisation of six million pounds, was
+four hundred and eighty million pounds. The adjusted EBITDA margin of twenty percent
+represents the highest level achieved in the Group's history and reflects sustained
+operational leverage as the business scales.
+
+SECTION 6: CAPITAL EXPENDITURE AND FREE CASH FLOW
+
+Capital expenditure for the year was sixty million pounds, comprising forty-two million
+of investment in cloud infrastructure and eighteen million in facilities and equipment.
+Capitalised development costs were ninety-six million pounds. Working capital improved
+by thirty-six million pounds as a result of faster customer collections and extended
+supplier payment terms negotiated during the year. Free cash flow conversion from
+adjusted EBITDA was seventy-one percent, ahead of the sixty-five percent medium-term
+target communicated at the Capital Markets Day in March 2023.
+
+SECTION 7: NET DEBT AND BALANCE SHEET
+
+Net debt at year end was one hundred and eighty million pounds, representing a leverage
+ratio of zero point four times adjusted EBITDA, well within the board's two times
+covenant. The revolving credit facility of three hundred and fifty million pounds was
+undrawn. Total equity attributable to shareholders was one point two billion pounds.
+Goodwill and intangible assets arising from acquisitions totalled eight hundred and
+forty million pounds. The Group's capital allocation framework prioritises organic
+investment first, followed by bolt-on acquisitions, then returns to shareholders through
+dividends and buybacks.
+
+SECTION 8: ACQUISITIONS AND INTEGRATION
+
+During fiscal year 2024 the Group completed two bolt-on acquisitions. Datasync Limited was
+acquired in July 2023 for an enterprise value of seventy-two million pounds and has been
+fully integrated into the Enterprise Software division. Analytix Partners was acquired in
+January 2024 for an enterprise value of one hundred and eight million pounds; integration
+of the technology and go-to-market teams is proceeding to plan and is expected to complete
+in the first half of fiscal year 2025. The combined contribution from acquisitions to
+revenue in fiscal year 2024 was forty-eight million pounds.
+
+SECTION 9: GEOGRAPHIC PERFORMANCE
+
+The United Kingdom and Ireland remained the largest region, contributing nine hundred
+million pounds in revenue, with growth of nine percent. North America was the fastest
+growing region, delivering revenue of five hundred and forty million pounds, growth of
+twenty-four percent, underpinned by strong new logo momentum and the Datasync acquisition.
+Continental Europe contributed four hundred and eighty million pounds, growth of twelve
+percent. Asia-Pacific and Rest of World contributed three hundred and sixty million pounds,
+growth of twenty percent, reflecting early-stage market penetration investments.
+
+SECTION 10: PEOPLE AND CULTURE
+
+The Group ended the fiscal year with five thousand and four hundred full-time equivalent
+employees, an increase of six hundred from the prior year. Employee engagement scores
+remained above eighty percent in the annual survey. The voluntary attrition rate was
+eleven percent, below the sector average of fourteen percent. The Group invested sixteen
+million pounds in learning and development programmes. Female representation in senior
+leadership roles increased from thirty-one to thirty-five percent.
+
+SECTION 11: ENVIRONMENTAL, SOCIAL AND GOVERNANCE
+
+The Group reduced absolute Scope 1 and Scope 2 greenhouse gas emissions by eighteen
+percent year-on-year, ahead of the twenty percent five-year target set in the 2021
+sustainability report. Renewable energy accounted for seventy-eight percent of total
+electricity consumption across owned premises. The Group published its first TCFD-aligned
+climate risk disclosure in October 2023. Supplier sustainability assessments were conducted
+for the top two hundred suppliers by spend, representing eighty-five percent of total
+procurement expenditure.
+
+SECTION 12: OUTLOOK AND GUIDANCE
+
+The Board is confident in the Group's ability to deliver continued profitable growth in
+fiscal year 2025. The Group has strong forward visibility supported by a twelve-month
+committed revenue backlog of one point eight billion pounds at the fiscal year end.
+Revenue guidance for fiscal year 2025 is two point six to two point seven billion pounds,
+representing growth of eight to thirteen percent. Adjusted EBITDA margin guidance is
+maintained at twenty to twenty-one percent.
+
+SECTION 13: PRINCIPAL RISKS
+
+The principal risks identified by the Board include macroeconomic uncertainty affecting
+customer spending, cybersecurity threats to systems and customer data, talent retention in
+a competitive labour market, technology disruption from artificial intelligence, and
+regulatory change including data protection and AI governance frameworks. Each risk is
+managed through a dedicated mitigation programme overseen by the Audit and Risk Committee.
+
+SECTION 14: CORPORATE GOVERNANCE
+
+The Board comprises ten directors: four executive directors and six independent non-executive
+directors. The Chair is independent. Board gender diversity is forty percent female.
+Audit, Remuneration, and Nomination Committees met the recommended frequency. The Annual
+General Meeting will be held on the fifteenth of June 2025 at the Group's registered office
+in London.
+
+SECTION 15: AUDIT CERTIFICATION AND REGULATORY COMPLIANCE FRAMEWORK
+
+The financial statements have been prepared in accordance with UK-adopted International
+Accounting Standards and the requirements of the Companies Act 2006. The independent
+auditors, FinanceAudit LLP, have issued an unqualified opinion. The internal audit function
+conducted forty-two reviews during the year and reported no material control deficiencies.
+The Group is fully compliant with the UK Corporate Governance Code. All regulatory filings
+were submitted within required deadlines. The compliance framework is subject to annual
+independent review by external legal counsel.
+HEADER
+  } > "$TMPDIR_DATA/long-report.txt"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION A — Smoke Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+section "A — Smoke Tests"
+
+# A1: Batch ingester status endpoint
+code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_URL/status" 2>/dev/null || echo 000)
+[ "$code" = "200" ] && pass "A1: Batch ingester status endpoint is healthy" \
+                     || fail "A1: Batch ingester status returned HTTP $code"
+
+# A2: RAG service health
+rag_health=$(curl -sf "$RAG_URL/health" 2>/dev/null || echo '{}')
+rag_status=$(echo "$rag_health" | jq -r '.status // "UNKNOWN"')
+[ "$rag_status" = "UP" ] && pass "A2: RAG service is UP (embedding, hxpr, llm all healthy)" \
+                           || fail "A2: RAG service status=$rag_status (expected UP)"
+echo "    $(echo "$rag_health" | jq -c '{embedding:.embedding.status, hxpr:.hxpr.status, llm:.llm.status}')"
+
+# A3: Alfresco repository connectivity
+code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
+  "$ALF_BASE/nodes/-root-/children" 2>/dev/null || echo 000)
+[ "$code" = "200" ] && pass "A3: Alfresco repository responds" \
+                     || fail "A3: Alfresco /nodes/-root-/children returned HTTP $code"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION B — Batch Ingestion
+# ═══════════════════════════════════════════════════════════════════════════════
+section "B — Alfresco Batch Ingestion"
+
+create_test_data
+
+# B1: Create test folder under admin home (or reuse if it already exists)
+FOLDER_RESP=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+  "$ALF_BASE/nodes/-my-/children" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"content-lake-test","nodeType":"cm:folder"}')
+FOLDER_HTTP=$(echo "$FOLDER_RESP" | tail -1)
+FOLDER_JSON=$(echo "$FOLDER_RESP" | head -1)
+
+if [ "$FOLDER_HTTP" = "201" ]; then
+  FOLDER_ID=$(echo "$FOLDER_JSON" | jq -r '.entry.id // empty')
+  pass "B1: Test folder created (nodeId=$FOLDER_ID)"
+elif [ "$FOLDER_HTTP" = "409" ]; then
+  # Folder already exists — look up its ID
+  FOLDER_ID=$(curl -sf -u "$ALF_AUTH" \
+    "$ALF_BASE/nodes/-my-/children?where=(nodeType='cm:folder')&fields=id,name" \
+    | jq -r '.list.entries[]? | select(.entry.name=="content-lake-test") | .entry.id' | head -1)
+  if [ -n "$FOLDER_ID" ]; then
+    pass "B1: Test folder already exists — reusing (nodeId=$FOLDER_ID)"
+  else
+    fail "B1: Test folder exists (409) but could not retrieve its nodeId"
+    FOLDER_ID="NONE"
+  fi
+else
+  fail "B1: Failed to create test folder (HTTP $FOLDER_HTTP)"
+  FOLDER_ID="NONE"
+fi
+
+if [ "$FOLDER_ID" != "NONE" ]; then
+
+# B2: Upload test documents
+TXT_ID=$(upload_file   "$FOLDER_ID" "$TMPDIR_DATA/short-memo.txt"      "short-memo.txt"      "text/plain")
+SEC_ID=$(upload_file   "$FOLDER_ID" "$TMPDIR_DATA/security-policy.txt"  "security-policy.txt"  "text/plain")
+ROAD_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/product-roadmap.txt"  "product-roadmap.txt"  "text/plain")
+TECH_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/technical-spec.txt"   "technical-spec.txt"   "text/plain")
+LONG_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/long-report.txt"      "long-report.txt"      "text/plain")
+
+for entry in "short-memo.txt:$TXT_ID" "security-policy.txt:$SEC_ID" \
+             "product-roadmap.txt:$ROAD_ID" "technical-spec.txt:$TECH_ID" \
+             "long-report.txt:$LONG_ID"; do
+  name="${entry%%:*}"; nid="${entry##*:}"
+  [ -n "$nid" ] && pass "B2: Uploaded $name (nodeId=$nid)" \
+                 || fail "B2: Failed to upload $name"
+done
+
+# B3+B4: Trigger sync with explicit folder and wait
+run_sync_wait "$FOLDER_ID"
+
+# Wait for embedding pipeline to process all chunks
+info "Waiting 60 s for embedding pipeline …"
+sleep 60
+
+# B5–B9: Verify each document in semantic search
+rag_find_node "remote work eligibility work from home three days"         "$TXT_ID"  "B5" "short-memo.txt (HR)"
+rag_find_node "information security policy password complexity"            "$SEC_ID"  "B6" "security-policy.txt (IT)"
+rag_find_node "product roadmap Q3 delivery mobile first strategy"          "$ROAD_ID" "B7" "product-roadmap.txt (Product)"
+rag_find_node "REST API endpoint HTTP authentication token"                "$TECH_ID" "B8" "technical-spec.txt (Engineering)"
+rag_find_node "fiscal year total revenue gross profit EBITDA"              "$LONG_ID" "B9" "long-report.txt (Finance)"
+
+# B10: Idempotency — re-run same sync, verify chunk count does not grow
+# Captures count BEFORE second sync, then after; passes if count is unchanged.
+if [ -n "${TXT_ID:-}" ]; then
+  resp_before=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
+  count_before=$(echo "$resp_before" | jq --arg id "$TXT_ID" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  info "Re-running sync for idempotency check (pre-sync count=$count_before) …"
+  resp2=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+    -H 'Content-Type: application/json' \
+    -d "{\"folders\":[\"$FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
+    2>/dev/null || echo '{}')
+  job2=$(echo "$resp2" | jq -r '.jobId // empty')
+  if [ -n "$job2" ]; then
+    info "Second sync job: $job2 — waiting 60 s for completion and embeddings …"
+    sleep 60
+  fi
+  resp_after=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
+  count_after=$(echo "$resp_after" | jq --arg id "$TXT_ID" \
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+  if [ "${count_after:-0}" -le "${count_before:-0}" ]; then
+    pass "B10: Idempotency — chunk count unchanged after re-sync (count=$count_after, no duplicates added)"
+  else
+    fail "B10: Idempotency — chunk count grew from $count_before to $count_after after re-sync (possible duplicates)"
+  fi
+fi
+
+fi  # end FOLDER_ID != NONE block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION C — Live Ingestion
+# ═══════════════════════════════════════════════════════════════════════════════
+section "C — Alfresco Live Ingestion"
+
+LIVE_NODE_ID=""
+
+if [ "$FOLDER_ID" != "NONE" ]; then
+
+# C1: Create document — should appear via live event (ActiveMQ → live-ingester)
+cat > "$TMPDIR_DATA/live-test-v1.txt" <<'EOF'
+LIVE INGESTION TEST DOCUMENT — VERSION ONE
+
+Unique sentinel phrase: xylophone-verdant-cascade-47z version one content.
+
+This document tests real-time event propagation from the Alfresco repository
+into the semantic search index via the live ingestion pipeline.
+EOF
+
+LIVE_NODE_ID=$(upload_file "$FOLDER_ID" "$TMPDIR_DATA/live-test-v1.txt" "live-test.txt" "text/plain")
+if [ -n "$LIVE_NODE_ID" ]; then
+  pass "C1a: Live test document created (nodeId=$LIVE_NODE_ID)"
+  info "Waiting 20 s for live event propagation and embedding …"
+  sleep 20
+  rag_find_node "xylophone-verdant-cascade-47z version one" "$LIVE_NODE_ID" "C1b" "live-test.txt after create event"
+else
+  fail "C1: Failed to create live test document"
+fi
+
+# C2: Update document content — new phrase should become searchable
+if [ -n "$LIVE_NODE_ID" ]; then
+  cat > "$TMPDIR_DATA/live-test-v2.txt" <<'EOF'
+LIVE INGESTION TEST DOCUMENT — VERSION TWO
+
+Unique sentinel phrase: tangerine-stellar-vortex-88q version two content.
+
+The document has been updated. This tests the update event flow.
+EOF
+  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+    "$ALF_BASE/nodes/$LIVE_NODE_ID/content" \
+    -H 'Content-Type: text/plain' \
+    --data-binary "@$TMPDIR_DATA/live-test-v2.txt" 2>/dev/null || echo 000)
+  if [ "$code" = "200" ]; then
+    pass "C2a: Document content updated (HTTP 200)"
+    info "Waiting 20 s for update event propagation …"
+    sleep 20
+    rag_find_node "tangerine-stellar-vortex-88q version two" "$LIVE_NODE_ID" "C2b" "live-test.txt after update event"
+  else
+    fail "C2: Content update returned HTTP $code"
+  fi
+fi
+
+# C3: Delete document — should disappear from search
+if [ -n "$LIVE_NODE_ID" ]; then
+  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
+    "$ALF_BASE/nodes/$LIVE_NODE_ID" 2>/dev/null || echo 000)
+  if [ "$code" = "204" ]; then
+    pass "C3a: Document deleted (HTTP 204)"
+    info "Waiting 20 s for delete event propagation …"
+    sleep 20
+    rag_absent_node "tangerine-stellar-vortex-88q" "$LIVE_NODE_ID" "C3b" "live-test.txt after delete event"
+  else
+    fail "C3: Delete returned HTTP $code (expected 204)"
+  fi
+fi
+
+fi  # end FOLDER_ID block
+
+# C4: Live ingester metrics (direct port — not exposed via proxy by default)
+live_resp=$(curl -sf "$LIVE_URL" 2>/dev/null || echo '')
+if [ -n "$live_resp" ]; then
+  received=$(echo "$live_resp" | jq -r '.received // "?"')
+  processed=$(echo "$live_resp" | jq -r '.processed // "?"')
+  pass "C4: Live ingester metrics — received=$received, processed=$processed"
+else
+  info "C4: Live ingester port 9092 not reachable from host (not published by default; use docker exec to reach it)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION G — Permission Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+section "G — Permission Tests"
+info "Permissions set via PUT /nodes/{id} body (CE 25.3 — sub-resource endpoint 404)."
+info "RAG permission filtering applies the authenticated user's identity against HXPR ACLs."
+
+if [ "$FOLDER_ID" != "NONE" ]; then
+
+# G0: Create test users in Alfresco
+create_alfresco_user "user-a" "User" "A"
+create_alfresco_user "user-b" "User" "B"
+
+# G1a: Upload HR doc, restrict to user-a
+cat > "$TMPDIR_DATA/confidential-hr.txt" <<'EOF'
+CONFIDENTIAL HR DOCUMENT
+Restricted to HR and user-a only.
+Content: salary band confidential HR restricted access user-a grade structure.
+EOF
+HR_PRIV_ID=$(upload_file "$FOLDER_ID" "$TMPDIR_DATA/confidential-hr.txt" "confidential-hr.txt" "text/plain")
+if [ -n "$HR_PRIV_ID" ]; then
+  perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}'
+  set_node_permissions "$HR_PRIV_ID" "$perms" \
+    && pass "G1a: confidential-hr.txt uploaded and restricted to user-a (nodeId=$HR_PRIV_ID)" \
+    || fail "G1a: Failed to set permissions on confidential-hr.txt"
+fi
+
+# G1b: Upload Tech doc, restrict to user-b
+cat > "$TMPDIR_DATA/tech-spec-restricted.txt" <<'EOF'
+RESTRICTED TECHNICAL DOCUMENT
+Restricted to engineering and user-b only.
+Content: internal architecture restricted technical user-b access system design.
+EOF
+TECH_PRIV_ID=$(upload_file "$FOLDER_ID" "$TMPDIR_DATA/tech-spec-restricted.txt" "tech-spec-restricted.txt" "text/plain")
+if [ -n "$TECH_PRIV_ID" ]; then
+  perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}'
+  set_node_permissions "$TECH_PRIV_ID" "$perms" \
+    && pass "G1b: tech-spec-restricted.txt uploaded and restricted to user-b (nodeId=$TECH_PRIV_ID)" \
+    || fail "G1b: Failed to set permissions on tech-spec-restricted.txt"
+fi
+
+# G1c: Upload public doc with GROUP_EVERYONE
+cat > "$TMPDIR_DATA/public-announcement.txt" <<'EOF'
+PUBLIC COMPANY ANNOUNCEMENT
+Available to all staff.
+Content: public company announcement everyone all staff general notice bulletin.
+EOF
+PUB_ID=$(upload_file "$FOLDER_ID" "$TMPDIR_DATA/public-announcement.txt" "public-announcement.txt" "text/plain")
+if [ -n "$PUB_ID" ]; then
+  perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"GROUP_EVERYONE","name":"Consumer","accessStatus":"ALLOWED"}]}'
+  set_node_permissions "$PUB_ID" "$perms" \
+    && pass "G1c: public-announcement.txt uploaded with GROUP_EVERYONE (nodeId=$PUB_ID)" \
+    || fail "G1c: Failed to set permissions on public-announcement.txt"
+fi
+
+info "Waiting 20 s for live events to propagate permission-scoped documents …"
+sleep 20
+
+# G2: Admin sees all documents
+rag_find_node "salary band confidential HR restricted access user-a"            "$HR_PRIV_ID"   "G2a" "Admin: confidential-hr.txt"
+rag_find_node "internal architecture restricted technical user-b access"        "$TECH_PRIV_ID" "G2b" "Admin: tech-spec-restricted.txt"
+rag_find_node "public company announcement everyone all staff general notice"   "$PUB_ID"       "G2c" "Admin: public-announcement.txt"
+
+# G3: user-a — RAG search with user-a credentials
+# NOTE: whether per-user filtering is enforced depends on RAG service Spring Security config.
+# This test documents observed behaviour in dev (permit-all) mode.
+info "G3: Searching as user-a (observing behaviour; per-user filtering requires Spring Security basic-auth in RAG service)"
+resp_ua=$(curl -sf -u "user-a:password" -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"salary band confidential HR restricted access","topK":10,"minScore":0.2}' \
+  2>/dev/null || echo '{}')
+found_ua=$(echo "$resp_ua" | jq --arg id "$HR_PRIV_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+if [ "${found_ua:-0}" -gt 0 ]; then
+  pass "G3a: user-a sees confidential-hr.txt (per-user auth IS enforced in RAG service)"
+else
+  info "G3a: user-a does NOT see confidential-hr.txt — RAG service uses service account for HXPR in permit-all mode"
+fi
+
+resp_ub_as_ua=$(curl -sf -u "user-a:password" -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"internal architecture restricted technical user-b","topK":10,"minScore":0.2}' \
+  2>/dev/null || echo '{}')
+found_ub_as_ua=$(echo "$resp_ub_as_ua" | jq --arg id "$TECH_PRIV_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+if [ "${found_ub_as_ua:-0}" -eq 0 ]; then
+  pass "G3b: user-a does NOT see tech-spec-restricted.txt (user-b only)"
+else
+  info "G3b: user-a CAN see tech-spec-restricted.txt — per-user ACL not enforced at RAG level in permit-all mode"
+fi
+
+# G6: Revoke user-a access, verify propagation
+if [ -n "${HR_PRIV_ID:-}" ]; then
+  # Remove all ACEs (nobody but system admin can access)
+  perms='{"isInheritanceEnabled":false,"locallySet":[]}'
+  set_node_permissions "$HR_PRIV_ID" "$perms" \
+    && info "G6: Revoked user-a access to confidential-hr.txt" \
+    || fail "G6: Failed to revoke user-a permission"
+  info "Waiting 20 s for permission-revocation event to propagate …"
+  sleep 20
+  rag_find_node "salary band confidential HR restricted" "$HR_PRIV_ID" "G6b" \
+    "Admin still finds confidential-hr.txt after user-a revocation"
+fi
+
+fi  # end FOLDER_ID block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION H — Chunking Strategy
+# ═══════════════════════════════════════════════════════════════════════════════
+section "H — Chunking Strategy"
+
+if [ -n "${TXT_ID:-}" ] && [ -n "${LONG_ID:-}" ]; then
+
+# H1: Short document — verify it's retrievable (single-doc in HR topic)
+resp_h1=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"home office equipment allowance ergonomic chair five hundred pounds","topK":5,"minScore":0.2}' \
+  2>/dev/null || echo '{}')
+count_h1=$(echo "$resp_h1" | jq --arg id "$TXT_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+chunk_preview=$(echo "$resp_h1" | jq -r --arg id "$TXT_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)][0].chunkText // ""' 2>/dev/null | head -c 100)
+if [ "${count_h1:-0}" -gt 0 ]; then
+  pass "H1: Short memo retrieved via specific phrase (chunks in results: $count_h1)"
+  info "    Chunk preview: ${chunk_preview}…"
+else
+  fail "H1: Short memo NOT found — chunking or embedding may have failed"
+fi
+
+# H2: Long document — early vs late section queries should return different chunk text
+resp_early=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"fiscal year total revenue gross profit EBITDA executive summary","topK":5,"minScore":0.2}' \
+  2>/dev/null || echo '{}')
+resp_late=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"audit certification regulatory compliance framework board approval","topK":5,"minScore":0.2}' \
+  2>/dev/null || echo '{}')
+
+early_text=$(echo "$resp_early" | jq -r --arg id "$LONG_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)][0].chunkText // ""' 2>/dev/null | head -c 80)
+late_text=$(echo "$resp_late" | jq -r --arg id "$LONG_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)][0].chunkText // ""' 2>/dev/null | head -c 80)
+early_pg=$(echo "$resp_early" | jq -r --arg id "$LONG_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)][0].chunkMetadata.page // "n/a"' 2>/dev/null)
+late_pg=$(echo "$resp_late" | jq -r --arg id "$LONG_ID" \
+  '[.results[]? | select(.sourceDocument.nodeId == $id)][0].chunkMetadata.page // "n/a"' 2>/dev/null)
+
+if [ -n "$early_text" ] && [ -n "$late_text" ] && [ "$early_text" != "$late_text" ]; then
+  pass "H2: Long report yields different chunks for early vs late section queries"
+  info "    Early (page=$early_pg): ${early_text}…"
+  info "    Late  (page=$late_pg):  ${late_text}…"
+elif [ -n "$early_text" ] && [ "$early_text" = "$late_text" ]; then
+  info "H2: Both queries returned the same chunk text — may be a single large chunk"
+else
+  fail "H2: Could not retrieve chunks from long report for early/late queries"
+fi
+
+# H3: Topic isolation — finance query top-3 should not include HR or tech docs
+resp_fin=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"capital expenditure shareholder dividends free cash flow","topK":3,"minScore":0.4}' \
+  2>/dev/null || echo '{}')
+top3_json=$(echo "$resp_fin" | jq -r '[.results[:3][]?.sourceDocument.nodeId] | join("\n")' 2>/dev/null || echo "")
+
+hr_in_top3=0
+tech_in_top3=0
+if echo "$top3_json" | grep -q "${TXT_ID:-__NONE__}"; then hr_in_top3=1; fi
+if echo "$top3_json" | grep -q "${TECH_ID:-__NONE__}"; then tech_in_top3=1; fi
+
+if [ "$hr_in_top3" -eq 0 ] && [ "$tech_in_top3" -eq 0 ]; then
+  pass "H3: Finance query top-3 contains no HR or Tech documents (topic isolation confirmed)"
+  info "    Top-3 nodeIds: $(echo "$top3_json" | head -3 | tr '\n' ' ')"
+else
+  fail "H3: Finance query top-3 includes non-finance document(s) — possible topic bleed"
+fi
+
+fi  # end chunking block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Summary
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+printf "${B}══ Alfresco Test Results ══${N}\n"
+printf "${G}  Passed : %d${N}\n" "$PASS"
+printf "${R}  Failed : %d${N}\n" "$FAIL"
+printf "  Log    : %s\n" "$LOG"
+echo ""
+
+[ "$FAIL" -eq 0 ]

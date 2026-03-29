@@ -6,3 +6,4 @@
 
 # Docker build artifacts
 *.tar
+*.log
