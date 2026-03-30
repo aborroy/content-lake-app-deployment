@@ -102,11 +102,11 @@ run_sync_wait() {
 }
 
 # rag_find_node <query> <node_id> <test_id> <label>
-# Searches RAG and checks that the given Alfresco nodeId appears in results.
+# Searches RAG (as admin) and checks that the given Alfresco nodeId appears in results.
 rag_find_node() {
   local query="$1" node_id="$2" tid="$3" label="$4"
   local resp found
-  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -123,7 +123,7 @@ rag_find_node() {
 rag_absent_node() {
   local query="$1" node_id="$2" tid="$3" label="$4"
   local resp found
-  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -631,7 +631,7 @@ rag_find_node "fiscal year total revenue gross profit EBITDA"              "$LON
 # B10: Idempotency — re-run same sync, verify chunk count does not grow
 # Captures count BEFORE second sync, then after; passes if count is unchanged.
 if [ -n "${TXT_ID:-}" ]; then
-  resp_before=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp_before=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
   count_before=$(echo "$resp_before" | jq --arg id "$TXT_ID" \
@@ -646,7 +646,7 @@ if [ -n "${TXT_ID:-}" ]; then
     info "Second sync job: $job2 — waiting 60 s for completion and embeddings …"
     sleep 60
   fi
-  resp_after=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp_after=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
   count_after=$(echo "$resp_after" | jq --arg id "$TXT_ID" \
@@ -745,6 +745,16 @@ section "G — Permission Tests"
 info "Permissions set via PUT /nodes/{id} body (CE 25.3 — sub-resource endpoint 404)."
 info "RAG permission filtering applies the authenticated user's identity against HXPR ACLs."
 
+# G-N: Unauthenticated RAG requests must be rejected with HTTP 401
+http_code_gn=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
+if [ "$http_code_gn" = "401" ]; then
+  pass "G-N: Unauthenticated RAG request rejected (HTTP 401)"
+else
+  fail "G-N: Expected HTTP 401 for unauthenticated request, got HTTP $http_code_gn"
+fi
+
 if [ "$FOLDER_ID" != "NONE" ]; then
 
 # G0: Create test users in Alfresco
@@ -801,33 +811,11 @@ rag_find_node "salary band confidential HR restricted access user-a"            
 rag_find_node "internal architecture restricted technical user-b access"        "$TECH_PRIV_ID" "G2b" "Admin: tech-spec-restricted.txt"
 rag_find_node "public company announcement everyone all staff general notice"   "$PUB_ID"       "G2c" "Admin: public-announcement.txt"
 
-# G3: user-a — RAG search with user-a credentials
-# NOTE: whether per-user filtering is enforced depends on RAG service Spring Security config.
-# This test documents observed behaviour in dev (permit-all) mode.
-info "G3: Searching as user-a (observing behaviour; per-user filtering requires Spring Security basic-auth in RAG service)"
-resp_ua=$(curl -sf -u "user-a:password" -X POST "$RAG_URL/search/semantic" \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"salary band confidential HR restricted access","topK":10,"minScore":0.2}' \
-  2>/dev/null || echo '{}')
-found_ua=$(echo "$resp_ua" | jq --arg id "$HR_PRIV_ID" \
-  '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
-if [ "${found_ua:-0}" -gt 0 ]; then
-  pass "G3a: user-a sees confidential-hr.txt (per-user auth IS enforced in RAG service)"
-else
-  info "G3a: user-a does NOT see confidential-hr.txt — RAG service uses service account for HXPR in permit-all mode"
-fi
-
-resp_ub_as_ua=$(curl -sf -u "user-a:password" -X POST "$RAG_URL/search/semantic" \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"internal architecture restricted technical user-b","topK":10,"minScore":0.2}' \
-  2>/dev/null || echo '{}')
-found_ub_as_ua=$(echo "$resp_ub_as_ua" | jq --arg id "$TECH_PRIV_ID" \
-  '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
-if [ "${found_ub_as_ua:-0}" -eq 0 ]; then
-  pass "G3b: user-a does NOT see tech-spec-restricted.txt (user-b only)"
-else
-  info "G3b: user-a CAN see tech-spec-restricted.txt — per-user ACL not enforced at RAG level in permit-all mode"
-fi
+# G3: user-a — RAG search with user-a credentials (per-user ACL enforced via HTTP Basic Auth)
+rag_find_node_as "salary band confidential HR restricted access user-a" \
+  "$HR_PRIV_ID" "G3a" "user-a sees confidential-hr.txt" "user-a:password"
+rag_absent_node_as "internal architecture restricted technical user-b access" \
+  "$TECH_PRIV_ID" "G3b" "user-a cannot see tech-spec-restricted.txt" "user-a:password"
 
 # G6: Revoke user-a access, verify propagation
 if [ -n "${HR_PRIV_ID:-}" ]; then
@@ -852,7 +840,7 @@ section "H — Chunking Strategy"
 if [ -n "${TXT_ID:-}" ] && [ -n "${LONG_ID:-}" ]; then
 
 # H1: Short document — verify it's retrievable (single-doc in HR topic)
-resp_h1=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+resp_h1=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"home office equipment allowance ergonomic chair five hundred pounds","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
@@ -868,11 +856,11 @@ else
 fi
 
 # H2: Long document — early vs late section queries should return different chunk text
-resp_early=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+resp_early=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"fiscal year total revenue gross profit EBITDA executive summary","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
-resp_late=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+resp_late=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"audit certification regulatory compliance framework board approval","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
@@ -897,7 +885,7 @@ else
 fi
 
 # H3: Topic isolation — finance query top-3 should not include HR or tech docs
-resp_fin=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+resp_fin=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"capital expenditure shareholder dividends free cash flow","topK":3,"minScore":0.4}' \
   2>/dev/null || echo '{}')

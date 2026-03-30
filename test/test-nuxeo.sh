@@ -71,20 +71,20 @@ run_nuxeo_sync_wait() {
 rag_find_source() {
   local query="$1" uid="$2" src_type="$3" tid="$4" label="$5"
   local resp found
-  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$uid" --arg src "$src_type" \
     '[.results[]? | select(
-        .cin_ingestProperties.source_nodeId == $id and
-        .cin_ingestProperties.source_type   == $src
+        .sourceDocument.nodeId     == $id and
+        .sourceDocument.sourceType == $src
       )] | length' 2>/dev/null || echo 0)
   if [ "${found:-0}" -gt 0 ]; then
     pass "$tid: $label found in search (uid=$uid, source_type=$src_type)"
     return 0
   else
     fail "$tid: $label NOT found (uid=$uid, source_type=$src_type, query='$query')"
-    echo "    top results: $(echo "$resp" | jq -c '[.results[:2][]? | {id:.cin_ingestProperties.source_nodeId, src:.cin_ingestProperties.source_type, score:.score}]')"
+    echo "    top results: $(echo "$resp" | jq -c '[.results[:2][]? | {id:.sourceDocument.nodeId, src:.sourceDocument.sourceType, score:.score}]')"
     return 1
   fi
 }
@@ -93,11 +93,11 @@ rag_find_source() {
 rag_absent_uid() {
   local query="$1" uid="$2" tid="$3" label="$4"
   local resp found
-  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$uid" \
-    '[.results[]? | select(.cin_ingestProperties.source_nodeId == $id)] | length' 2>/dev/null || echo 0)
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
   if [ "${found:-0}" -eq 0 ]; then
     pass "$tid: $label correctly absent from search"
   else
@@ -198,11 +198,11 @@ info "Re-running Nuxeo sync for idempotency check …"
 curl -sf -u "$NUXEO_AUTH" -X POST "$SYNC_URL/configured" >/dev/null 2>&1 || true
 sleep 10
 if [ -n "${HR_UID:-}" ]; then
-  resp=$(curl -sf -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d '{"query":"remote work eligibility Nuxeo","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
   count=$(echo "$resp" | jq --arg id "$HR_UID" \
-    '[.results[]? | select(.cin_ingestProperties.source_nodeId == $id)] | length' 2>/dev/null || echo 0)
+    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
   if [ "${count:-0}" -eq 1 ]; then
     pass "D9: Idempotency — Nuxeo HR document present exactly once (count=$count)"
   elif [ "${count:-0}" -eq 0 ]; then
@@ -251,6 +251,21 @@ if [ -n "$LIVE_NUX_UID" ]; then
   else
     fail "E2: Delete returned HTTP $code (expected 204)"
   fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION F — Security Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+section "F — Security Tests (Nuxeo mode)"
+
+# F-N: Unauthenticated RAG requests must be rejected with HTTP 401
+http_code_fn=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
+if [ "$http_code_fn" = "401" ]; then
+  pass "F-N: Unauthenticated RAG request rejected (HTTP 401)"
+else
+  fail "F-N: Expected HTTP 401 for unauthenticated request, got HTTP $http_code_fn"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
