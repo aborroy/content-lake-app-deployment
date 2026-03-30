@@ -222,6 +222,9 @@ PY
     ;;
 esac
 
+WORKSPACE_PATH_ACTUAL="$(json_field "$WORKSPACE_RESPONSE" "path")"
+[[ -n "$WORKSPACE_PATH_ACTUAL" ]] || fail "Workspace response missing path: $(cat "$WORKSPACE_RESPONSE")"
+
 # Grant Everyone Read on the workspace so indexed documents are visible in
 # anonymous RAG search (NodeSyncService maps GROUP_EVERYONE → __Everyone__ in sys_racl).
 # Nuxeo deduplicates ACEs, so this is safe to call on every run.
@@ -273,7 +276,7 @@ document_status="$(
   request_json \
     "$DOCUMENT_RESPONSE" \
     -X POST \
-    "${BASE_URL}/api/v1/path${WORKSPACE_PATH}" \
+    "${BASE_URL}/api/v1/path${WORKSPACE_PATH_ACTUAL}" \
     -H 'Content-Type: application/json' \
     --data "$document_payload"
 )"
@@ -314,7 +317,7 @@ BLOB_DIGEST="$(json_field "$VERIFY_RESPONSE" "properties.file:content.digest")"
 
 cat <<EOF
 Created Nuxeo demo document.
-Workspace: ${WORKSPACE_PATH}
+Workspace: ${WORKSPACE_PATH_ACTUAL}
 UID: ${DOCUMENT_UID}
 Path: ${DOCUMENT_PATH}
 Blob filename: ${FILENAME}
