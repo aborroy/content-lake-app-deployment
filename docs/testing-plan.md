@@ -341,9 +341,9 @@ curl -s http://localhost:9092/api/live/status | jq .
 Expected: `received`, `processed`, `filtered`, and `errors` counters are non-zero and
 reflect the events triggered in C1–C3.
 
-### C5 — Permission change propagation (live)
+### C5 — Permission change propagation
 
-Grant `user-a` read access to a previously admin-only document and verify the change
+Grant `user-a` read access to a previously restricted document and verify the change
 propagates to the search index (see also Section G for the full permission test suite).
 
 ```bash
@@ -354,12 +354,16 @@ curl -s -u admin:admin -X PUT \
   -d '{
     "isInheritanceEnabled": false,
     "locallySet": [
-      {"authorityId":"admin","name":"SiteManager","accessStatus":"ALLOWED"},
       {"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}
     ]
   }'
 
-sleep 15
+# Reconcile the ACL explicitly because Alfresco does not emit permission update events
+curl -s -u admin:admin -X POST http://localhost:9090/api/sync/permissions \
+  -H 'Content-Type: application/json' \
+  -d "{\"nodeIds\":[\"$TXT_ID\"],\"recursive\":true}" | jq .
+
+sleep 5
 
 # Search as user-a — should now find the document
 curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
@@ -596,10 +600,14 @@ Expected: array contains both `"alfresco"` and `"nuxeo"`.
 Run after batch ingestion (Section B) has completed. Tests use documents uploaded with
 specific ACLs.
 
+For Alfresco sources, repository administrators remain discoverability-equivalent to
+repository admins even when they are not explicitly present in `locallySet`. The examples
+below therefore grant only the intended end-user or group ACEs.
+
 ### G1 — Setup: upload permission-scoped documents
 
 ```bash
-# confidential-hr.txt — only admin + user-a
+# confidential-hr.txt — only user-a (Alfresco admins still see it)
 HR_PRIV_ID=$(curl -s -u admin:admin -X POST \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
   -F "filedata=@short-memo.txt;type=text/plain" \
@@ -609,10 +617,9 @@ curl -s -u admin:admin -X PUT \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$HR_PRIV_ID/permissions" \
   -H 'Content-Type: application/json' \
   -d '{"isInheritanceEnabled":false,"locallySet":[
-        {"authorityId":"admin","name":"SiteManager","accessStatus":"ALLOWED"},
         {"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}'
 
-# tech-spec-internal.pdf — only admin + user-b
+# tech-spec-internal.pdf — only user-b (Alfresco admins still see it)
 TECH_PRIV_ID=$(curl -s -u admin:admin -X POST \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
   -F "filedata=@technical-spec.pdf;type=application/pdf" \
@@ -622,7 +629,6 @@ curl -s -u admin:admin -X PUT \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$TECH_PRIV_ID/permissions" \
   -H 'Content-Type: application/json' \
   -d '{"isInheritanceEnabled":false,"locallySet":[
-        {"authorityId":"admin","name":"SiteManager","accessStatus":"ALLOWED"},
         {"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}'
 
 # roadmap.pptx — GROUP_EVERYONE (public)
@@ -635,11 +641,11 @@ curl -s -u admin:admin -X PUT \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$PUBLIC_ID/permissions" \
   -H 'Content-Type: application/json' \
   -d '{"isInheritanceEnabled":false,"locallySet":[
-        {"authorityId":"admin","name":"SiteManager","accessStatus":"ALLOWED"},
         {"authorityId":"GROUP_EVERYONE","name":"Consumer","accessStatus":"ALLOWED"}]}'
 ```
 
-Trigger sync or wait for live events, then verify all three are indexed as admin (G2 below).
+Call `/api/sync/permissions` for each changed node, or use a client flow that does it for you,
+then verify all three are indexed as admin (G2 below).
 
 ### G2 — Admin sees all documents
 
@@ -654,7 +660,9 @@ done
 ```
 
 Expected: each query returns at least one result; all three document node IDs (`$HR_PRIV_ID`,
-`$TECH_PRIV_ID`, `$PUBLIC_ID`) appear across the three queries.
+`$TECH_PRIV_ID`, `$PUBLIC_ID`) appear across the three queries. This confirms that Alfresco
+repository admins remain able to discover Alfresco documents even when the stored ACL only names
+the end user or `GROUP_EVERYONE`.
 
 ### G3 — user-a sees own documents + public
 
@@ -707,8 +715,7 @@ curl -s -u user-b:password -X POST http://localhost/api/rag/search/semantic \
 curl -s -u admin:admin -X PUT \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$HR_PRIV_ID/permissions" \
   -H 'Content-Type: application/json' \
-  -d '{"isInheritanceEnabled":false,"locallySet":[
-        {"authorityId":"admin","name":"SiteManager","accessStatus":"ALLOWED"}]}'
+  -d '{"isInheritanceEnabled":false,"locallySet":[]}'
 
 sleep 15
 
@@ -719,9 +726,112 @@ curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
   | jq '[.results[] | .cin_ingestProperties.source_nodeId]'
 ```
 
-Expected: `$HR_PRIV_ID` is absent from user-a's results after revocation.
+Expected: `$HR_PRIV_ID` is absent from user-a's results after revocation. An Alfresco admin can
+still discover it because admin visibility is source-level rather than encoded as a synthetic ACE.
 
-### G6 — Nuxeo permissions *(full stack only)*
+### G6 — Folder ACL propagation to descendants
+
+Validates that a folder-level permission change is propagated to all descendant files in hxpr
+without re-ingesting content (issues #27 and #31).
+
+Two child files cover the two propagation branches:
+
+| File | `isInheritanceEnabled` | `locallySet` | Expected after folder restricted to user-a |
+|---|---|---|---|
+| `folder-child-inherit.txt` | `true` (default) | — | Inherits folder ACL → user-a only |
+| `folder-child-isolated.txt` | `false` | `user-b` | Keeps own ACL → user-b only |
+
+#### G6.1 — Setup: create folder and upload children
+
+```bash
+PERM_FOLDER_ID=$(curl -s -u admin:admin -X POST \
+  "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"perm-propagation-test","nodeType":"cm:folder"}' \
+  | jq -r '.entry.id')
+
+# Child 1: no local ACL; will inherit from the folder
+FOLD_CHILD_INHERIT_ID=$(curl -s -u admin:admin -X POST \
+  "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$PERM_FOLDER_ID/children" \
+  -F 'filedata=@folder-child-inherit.txt;type=text/plain' \
+  -F 'name=folder-child-inherit.txt' | jq -r '.entry.id')
+
+# Child 2: inheritance disabled; locally restricted to user-b only
+FOLD_CHILD_ISOLATED_ID=$(curl -s -u admin:admin -X POST \
+  "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$PERM_FOLDER_ID/children" \
+  -F 'filedata=@folder-child-isolated.txt;type=text/plain' \
+  -F 'name=folder-child-isolated.txt' | jq -r '.entry.id')
+
+curl -s -u admin:admin -X PUT \
+  "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLD_CHILD_ISOLATED_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"permissions":{"isInheritanceEnabled":false,"locallySet":[
+        {"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}}'
+```
+
+#### G6.2 — Ingest the subtree
+
+```bash
+curl -s -u admin:admin -X POST http://localhost/api/sync/batch \
+  -H 'Content-Type: application/json' \
+  -d "{\"folders\":[\"$PERM_FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}"
+# Wait for COMPLETED, then verify both files are visible as admin.
+```
+
+#### G6.3 — Change folder permissions and reconcile
+
+Disable inheritance on the folder and restrict to user-a only, then trigger a recursive ACL
+reconciliation (no content re-ingestion):
+
+```bash
+curl -s -u admin:admin -X PUT \
+  "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$PERM_FOLDER_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"permissions":{"isInheritanceEnabled":false,"locallySet":[
+        {"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}}'
+
+curl -s -u admin:admin -X POST http://localhost/api/sync/permissions \
+  -H 'Content-Type: application/json' \
+  -d "{\"nodeIds\":[\"$PERM_FOLDER_ID\"],\"recursive\":true}"
+```
+
+#### G6.4 — Verify propagation results
+
+Expected after reconciliation:
+
+```bash
+# user-a FINDS folder-child-inherit.txt (inherited folder ACL)
+curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"zephyr-indigo-kappa-fold inherited ACL propagation","topK":5,"minScore":0.2}' \
+  | jq '[.results[] | .sourceDocument.nodeId]'
+# Expected: contains $FOLD_CHILD_INHERIT_ID
+
+# user-b CANNOT find folder-child-inherit.txt (removed from folder ACL)
+curl -s -u user-b:password -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"zephyr-indigo-kappa-fold inherited ACL propagation","topK":5,"minScore":0.2}' \
+  | jq '[.results[] | .sourceDocument.nodeId]'
+# Expected: does NOT contain $FOLD_CHILD_INHERIT_ID
+
+# user-b STILL finds folder-child-isolated.txt (own ACL unchanged)
+curl -s -u user-b:password -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"zephyr-indigo-kappa-isol isolated ACL no-inherit propagation","topK":5,"minScore":0.2}' \
+  | jq '[.results[] | .sourceDocument.nodeId]'
+# Expected: contains $FOLD_CHILD_ISOLATED_ID
+
+# user-a CANNOT find folder-child-isolated.txt (not in file's own locallySet)
+curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"zephyr-indigo-kappa-isol isolated ACL no-inherit propagation","topK":5,"minScore":0.2}' \
+  | jq '[.results[] | .sourceDocument.nodeId]'
+# Expected: does NOT contain $FOLD_CHILD_ISOLATED_ID
+
+# Admin finds both files (source-level bypass, unaffected by any ACL)
+```
+
+### G7 — Nuxeo permissions *(full stack only)*
 
 Repeat the G1–G5 pattern using Nuxeo ACP APIs:
 

@@ -38,6 +38,29 @@ trap cleanup EXIT
 
 # ── Test helpers ──────────────────────────────────────────────────────────────
 
+# create_folder <parent_node_id> <name>
+# Returns the nodeId of the created (or already-existing) folder.
+create_folder() {
+  local parent="$1" name="$2"
+  local resp http_code body
+  resp=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+    "$ALF_BASE/nodes/$parent/children" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$name\",\"nodeType\":\"cm:folder\"}" 2>/dev/null)
+  http_code=$(printf '%s' "$resp" | tail -1)
+  body=$(printf '%s' "$resp" | head -1)
+  if [ "$http_code" = "201" ]; then
+    printf '%s' "$body" | jq -r '.entry.id // empty'
+  elif [ "$http_code" = "409" ]; then
+    curl -sf -u "$ALF_AUTH" \
+      "$ALF_BASE/nodes/$parent/children?fields=id,name&maxItems=100" 2>/dev/null \
+      | jq -r --arg n "$name" \
+          '.list.entries[]? | select(.entry.name==$n) | .entry.id' | head -1
+  else
+    echo ""
+  fi
+}
+
 # upload_file <parent_node_id> <local_path> [name] [mime]
 # Returns the nodeId of the uploaded (or already-existing) file.
 upload_file() {
@@ -172,6 +195,16 @@ rag_absent_node_as() {
 # set_node_permissions <node_id> <json_permissions_object>
 # Uses PUT /nodes/{id} with a permissions field in the body.
 # Valid roles: Consumer, Editor, Contributor, Collaborator, Coordinator
+reconcile_node_permissions() {
+  local node_id="$1" recursive="${2:-true}"
+  local resp failed
+  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/permissions" \
+    -H 'Content-Type: application/json' \
+    -d "{\"nodeIds\":[\"$node_id\"],\"recursive\":$recursive}" 2>/dev/null || echo '{}')
+  failed=$(echo "$resp" | jq -r '.failed // 1' 2>/dev/null || echo 1)
+  [ "$failed" = "0" ]
+}
+
 set_node_permissions() {
   local node_id="$1" perms_json="$2"
   local code
@@ -179,7 +212,7 @@ set_node_permissions() {
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
     -d "{\"permissions\":$perms_json}" 2>/dev/null || echo 000)
-  [ "$code" = "200" ]
+  [ "$code" = "200" ] && reconcile_node_permissions "$node_id" true
 }
 
 # create_alfresco_user <id> <first> <last>
@@ -743,7 +776,9 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 section "G — Permission Tests"
 info "Permissions set via PUT /nodes/{id} body (CE 25.3 — sub-resource endpoint 404)."
+info "Permission changes are reconciled through /api/sync/permissions because Alfresco does not emit permission update events."
 info "RAG permission filtering applies the authenticated user's identity against HXPR ACLs."
+info "For Alfresco sources, repository admins remain discoverable across Alfresco content even when not listed in locallySet."
 
 # G-N: Unauthenticated RAG requests must be rejected with HTTP 401
 http_code_gn=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
@@ -803,8 +838,8 @@ if [ -n "$PUB_ID" ]; then
     || fail "G1c: Failed to set permissions on public-announcement.txt"
 fi
 
-info "Waiting 20 s for live events to propagate permission-scoped documents …"
-sleep 20
+info "Waiting 5 s for permission reconciliation to be indexed …"
+sleep 5
 
 # G2: Admin sees all documents
 rag_find_node "salary band confidential HR restricted access user-a"            "$HR_PRIV_ID"   "G2a" "Admin: confidential-hr.txt"
@@ -816,19 +851,155 @@ rag_find_node_as "salary band confidential HR restricted access user-a" \
   "$HR_PRIV_ID" "G3a" "user-a sees confidential-hr.txt" "user-a:password"
 rag_absent_node_as "internal architecture restricted technical user-b access" \
   "$TECH_PRIV_ID" "G3b" "user-a cannot see tech-spec-restricted.txt" "user-a:password"
+rag_find_node_as "public company announcement everyone all staff general notice" \
+  "$PUB_ID" "G3c" "user-a sees public-announcement.txt" "user-a:password"
 
-# G6: Revoke user-a access, verify propagation
+# G4: user-b — symmetric check
+rag_find_node_as "internal architecture restricted technical user-b access" \
+  "$TECH_PRIV_ID" "G4a" "user-b sees tech-spec-restricted.txt" "user-b:password"
+rag_absent_node_as "salary band confidential HR restricted access user-a" \
+  "$HR_PRIV_ID" "G4b" "user-b cannot see confidential-hr.txt" "user-b:password"
+rag_find_node_as "public company announcement everyone all staff general notice" \
+  "$PUB_ID" "G4c" "user-b sees public-announcement.txt" "user-b:password"
+
+# G5/G6: Revoke user-a access — admin still finds the document; user-a no longer does.
 if [ -n "${HR_PRIV_ID:-}" ]; then
   # Remove all ACEs (nobody but system admin can access)
   perms='{"isInheritanceEnabled":false,"locallySet":[]}'
   set_node_permissions "$HR_PRIV_ID" "$perms" \
-    && info "G6: Revoked user-a access to confidential-hr.txt" \
-    || fail "G6: Failed to revoke user-a permission"
-  info "Waiting 20 s for permission-revocation event to propagate …"
-  sleep 20
-  rag_find_node "salary band confidential HR restricted" "$HR_PRIV_ID" "G6b" \
+    && info "G5: Revoked user-a access to confidential-hr.txt" \
+    || fail "G5: Failed to revoke user-a permission"
+  info "Waiting 5 s for permission revocation to be indexed …"
+  sleep 5
+  rag_find_node "salary band confidential HR restricted" "$HR_PRIV_ID" "G6a" \
     "Admin still finds confidential-hr.txt after user-a revocation"
+  rag_absent_node_as "salary band confidential HR restricted" "$HR_PRIV_ID" "G6b" \
+    "user-a cannot find confidential-hr.txt after revocation" "user-a:password"
 fi
+
+# ── Issue #27: Folder permission propagation ─────────────────────────────────
+
+# G7: Create a dedicated folder with two types of child files to test that a
+# folder-level ACL change propagates correctly to descendants:
+#   - folder-child-inherit.txt  — no local ACL; should adopt the folder's ACL
+#   - folder-child-isolated.txt — isInheritanceEnabled:false, locallySet=[user-b];
+#                                  must NOT follow the folder after the ACL change
+info "Issue #27: Folder permission propagation to descendant hxpr ACLs"
+PERM_FOLDER_ID=$(create_folder "${FOLDER_ID}" "perm-propagation-test")
+if [ -n "$PERM_FOLDER_ID" ]; then
+  pass "G7: perm-propagation-test folder ready (nodeId=$PERM_FOLDER_ID)"
+else
+  fail "G7: Failed to create perm-propagation-test folder"
+  PERM_FOLDER_ID="NONE"
+fi
+
+if [ "$PERM_FOLDER_ID" != "NONE" ]; then
+
+cat > "$TMPDIR_DATA/folder-child-inherit.txt" <<'EOF'
+FOLDER CHILD — INHERITED PERMISSIONS
+Sentinel phrase: zephyr-indigo-kappa-fold inherited ACL propagation test.
+This file relies on the parent folder's effective permissions.
+EOF
+FOLD_CHILD_INHERIT_ID=$(upload_file "$PERM_FOLDER_ID" \
+  "$TMPDIR_DATA/folder-child-inherit.txt" "folder-child-inherit.txt" "text/plain")
+if [ -n "$FOLD_CHILD_INHERIT_ID" ]; then
+  pass "G7a: folder-child-inherit.txt uploaded (nodeId=$FOLD_CHILD_INHERIT_ID)"
+else
+  fail "G7a: Failed to upload folder-child-inherit.txt"
+fi
+
+cat > "$TMPDIR_DATA/folder-child-isolated.txt" <<'EOF'
+FOLDER CHILD — ISOLATED PERMISSIONS
+Sentinel phrase: zephyr-indigo-kappa-isol isolated ACL no-inherit propagation test.
+This file has isInheritanceEnabled:false with a locally-set ACL for user-b only.
+EOF
+FOLD_CHILD_ISOLATED_ID=$(upload_file "$PERM_FOLDER_ID" \
+  "$TMPDIR_DATA/folder-child-isolated.txt" "folder-child-isolated.txt" "text/plain")
+if [ -n "$FOLD_CHILD_ISOLATED_ID" ]; then
+  perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}'
+  set_node_permissions "$FOLD_CHILD_ISOLATED_ID" "$perms" \
+    && pass "G7b: folder-child-isolated.txt uploaded and restricted to user-b (nodeId=$FOLD_CHILD_ISOLATED_ID)" \
+    || fail "G7b: Failed to set permissions on folder-child-isolated.txt"
+else
+  fail "G7b: Failed to upload folder-child-isolated.txt"
+fi
+
+# G8: Ingest the folder subtree so both files are in hxpr before any ACL change.
+info "G8: Triggering batch sync for perm-propagation-test folder …"
+if run_sync_wait "$PERM_FOLDER_ID"; then
+  pass "G8: Batch sync completed"
+else
+  fail "G8: Batch sync did not complete"
+fi
+info "Waiting 5 s for embeddings to settle …"
+sleep 5
+
+rag_find_node "zephyr-indigo-kappa-fold inherited ACL propagation" \
+  "$FOLD_CHILD_INHERIT_ID" "G8a" "Admin: folder-child-inherit.txt visible before ACL change"
+rag_find_node "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
+  "$FOLD_CHILD_ISOLATED_ID" "G8b" "Admin: folder-child-isolated.txt visible before ACL change"
+
+# G9: Change folder permissions — disable inheritance, restrict to user-a only —
+# then trigger a recursive batch ACL reconciliation.  No content is re-ingested.
+info "G9: Restricting perm-propagation-test folder to user-a only …"
+folder_perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}'
+g9_code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+  "$ALF_BASE/nodes/$PERM_FOLDER_ID" \
+  -H 'Content-Type: application/json' \
+  -d "{\"permissions\":$folder_perms}" 2>/dev/null || echo 000)
+if [ "$g9_code" = "200" ]; then
+  pass "G9: Folder permissions updated to user-a only (HTTP 200)"
+else
+  fail "G9: Failed to update folder permissions (HTTP $g9_code)"
+fi
+
+reconcile_node_permissions "$PERM_FOLDER_ID" true \
+  && pass "G9: Recursive ACL reconciliation triggered" \
+  || fail "G9: ACL reconciliation request failed"
+info "Waiting 5 s for ACL reconciliation to propagate …"
+sleep 5
+
+# G10: Verify ACL propagation (issue #27 acceptance criteria):
+#
+#  folder-child-inherit.txt  — inheritance enabled → adopts folder's new ACL
+#    G10a: user-a FINDS it (folder grants user-a, child inherits)
+#    G10b: user-b CANNOT find it (removed from folder's ACL)
+#    G10c: admin FINDS it (source-level bypass)
+#
+#  folder-child-isolated.txt — isInheritanceEnabled:false, locallySet=[user-b]
+#    G10d: user-b STILL finds it (own ACL unchanged by folder change)
+#    G10e: user-a CANNOT find it (not in file's own locallySet)
+#    G10f: admin FINDS it (source-level bypass)
+rag_find_node_as \
+  "zephyr-indigo-kappa-fold inherited ACL propagation" \
+  "$FOLD_CHILD_INHERIT_ID" "G10a" \
+  "user-a finds folder-child-inherit.txt after folder restricted to user-a" \
+  "user-a:password"
+rag_absent_node_as \
+  "zephyr-indigo-kappa-fold inherited ACL propagation" \
+  "$FOLD_CHILD_INHERIT_ID" "G10b" \
+  "user-b cannot find folder-child-inherit.txt after folder restricted to user-a" \
+  "user-b:password"
+rag_find_node \
+  "zephyr-indigo-kappa-fold inherited ACL propagation" \
+  "$FOLD_CHILD_INHERIT_ID" "G10c" \
+  "Admin finds folder-child-inherit.txt after folder ACL change"
+rag_find_node_as \
+  "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
+  "$FOLD_CHILD_ISOLATED_ID" "G10d" \
+  "user-b still finds folder-child-isolated.txt (own ACL, inheritance disabled)" \
+  "user-b:password"
+rag_absent_node_as \
+  "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
+  "$FOLD_CHILD_ISOLATED_ID" "G10e" \
+  "user-a cannot find folder-child-isolated.txt (not in file's own locallySet)" \
+  "user-a:password"
+rag_find_node \
+  "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
+  "$FOLD_CHILD_ISOLATED_ID" "G10f" \
+  "Admin finds folder-child-isolated.txt after folder ACL change"
+
+fi  # end PERM_FOLDER_ID block
 
 fi  # end FOLDER_ID block
 
@@ -904,6 +1075,149 @@ else
 fi
 
 fi  # end chunking block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION I — Folder Hierarchy Scope Exclusion
+# ═══════════════════════════════════════════════════════════════════════════════
+section "I — Folder Hierarchy Scope Exclusion"
+info "Hierarchy (4 folder levels):"
+info "  cl-hierarchy-test/  ← cl:indexed auto-added by batch sync"
+info "    hier-doc-l0.txt   ← EXPECTED: indexed"
+info "    level1/"
+info "      hier-doc-l1.txt ← EXPECTED: indexed"
+info "      level2-excluded/ ← cl:excludeFromLake=true"
+info "        hier-doc-l2.txt ← EXPECTED: absent"
+info "        level3/"
+info "          hier-doc-l3.txt ← EXPECTED: absent (ancestor excluded)"
+
+# set_exclude_from_lake <node_id>
+# Adds the cl:fileScope aspect and sets cl:excludeFromLake=true without stripping
+# existing aspects (fetches current list first and merges).
+set_exclude_from_lake() {
+  local node_id="$1"
+  local current_aspects merged_aspects code
+  current_aspects=$(curl -sf -u "$ALF_AUTH" \
+    "$ALF_BASE/nodes/$node_id?fields=aspectNames" 2>/dev/null \
+    | jq -c '.entry.aspectNames // []')
+  merged_aspects=$(printf '%s' "$current_aspects" \
+    | jq -c '. + ["cl:fileScope"] | unique')
+  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+    "$ALF_BASE/nodes/$node_id" \
+    -H 'Content-Type: application/json' \
+    -d "{\"aspectNames\":$merged_aspects,\"properties\":{\"cl:excludeFromLake\":true}}" \
+    2>/dev/null || echo 000)
+  [ "$code" = "200" ]
+}
+
+# I1: Create the root folder for this test
+HIER_ROOT_ID=$(create_folder "-my-" "cl-hierarchy-test")
+if [ -n "$HIER_ROOT_ID" ]; then
+  pass "I1: Root folder ready (nodeId=$HIER_ROOT_ID)"
+else
+  fail "I1: Failed to create root folder"
+  HIER_ROOT_ID="NONE"
+fi
+
+if [ "$HIER_ROOT_ID" != "NONE" ]; then
+
+# I2: Build the three-level sub-hierarchy
+LEVEL1_ID=""
+LEVEL2_EXCL_ID=""
+LEVEL3_ID=""
+LEVEL1_ID=$(create_folder "$HIER_ROOT_ID" "level1")
+[ -n "$LEVEL1_ID" ] && LEVEL2_EXCL_ID=$(create_folder "$LEVEL1_ID" "level2-excluded")
+[ -n "$LEVEL2_EXCL_ID" ] && LEVEL3_ID=$(create_folder "$LEVEL2_EXCL_ID" "level3")
+
+if [ -n "$LEVEL1_ID" ] && [ -n "$LEVEL2_EXCL_ID" ] && [ -n "$LEVEL3_ID" ]; then
+  pass "I2: Sub-hierarchy created (level1=$LEVEL1_ID, level2-excluded=$LEVEL2_EXCL_ID, level3=$LEVEL3_ID)"
+else
+  fail "I2: Failed to create sub-folders (level1='$LEVEL1_ID', level2='$LEVEL2_EXCL_ID', level3='$LEVEL3_ID')"
+fi
+
+# I3: Upload one document per folder level with unique sentinel phrases
+cat > "$TMPDIR_DATA/hier-doc-l0.txt" <<'EOF'
+HIERARCHY TEST — ROOT LEVEL DOCUMENT
+Sentinel phrase: zephyr-cobalt-lambda-00r root level in-scope content.
+This document is placed directly in the root hierarchy test folder.
+EOF
+cat > "$TMPDIR_DATA/hier-doc-l1.txt" <<'EOF'
+HIERARCHY TEST — LEVEL 1 DOCUMENT
+Sentinel phrase: zephyr-cobalt-lambda-11r level one in-scope content.
+This document is one level below the root and should be indexed.
+EOF
+cat > "$TMPDIR_DATA/hier-doc-l2.txt" <<'EOF'
+HIERARCHY TEST — LEVEL 2 DOCUMENT (EXCLUDED)
+Sentinel phrase: zephyr-cobalt-lambda-22r level two excluded content.
+This document is inside the folder marked with cl:excludeFromLake=true.
+EOF
+cat > "$TMPDIR_DATA/hier-doc-l3.txt" <<'EOF'
+HIERARCHY TEST — LEVEL 3 DOCUMENT (EXCLUDED BY ANCESTOR)
+Sentinel phrase: zephyr-cobalt-lambda-33r level three ancestor-excluded content.
+This document is inside a sub-folder of the excluded folder.
+EOF
+
+DOC_L0_ID=$(upload_file "$HIER_ROOT_ID"   "$TMPDIR_DATA/hier-doc-l0.txt" "hier-doc-l0.txt" "text/plain")
+DOC_L1_ID=$(upload_file "$LEVEL1_ID"      "$TMPDIR_DATA/hier-doc-l1.txt" "hier-doc-l1.txt" "text/plain")
+DOC_L2_ID=$(upload_file "$LEVEL2_EXCL_ID" "$TMPDIR_DATA/hier-doc-l2.txt" "hier-doc-l2.txt" "text/plain")
+DOC_L3_ID=$(upload_file "$LEVEL3_ID"      "$TMPDIR_DATA/hier-doc-l3.txt" "hier-doc-l3.txt" "text/plain")
+
+for entry in "hier-doc-l0.txt:$DOC_L0_ID" "hier-doc-l1.txt:$DOC_L1_ID" \
+             "hier-doc-l2.txt:$DOC_L2_ID" "hier-doc-l3.txt:$DOC_L3_ID"; do
+  fname="${entry%%:*}"; nid="${entry##*:}"
+  [ -n "$nid" ] && pass "I3: Uploaded $fname (nodeId=$nid)" \
+                 || fail "I3: Failed to upload $fname"
+done
+
+# I4: Disable level2-excluded from synchronisation
+if [ -n "$LEVEL2_EXCL_ID" ]; then
+  set_exclude_from_lake "$LEVEL2_EXCL_ID" \
+    && pass "I4: cl:excludeFromLake=true applied to level2-excluded (nodeId=$LEVEL2_EXCL_ID)" \
+    || fail "I4: Failed to set cl:excludeFromLake on level2-excluded"
+fi
+
+# I5+I6: Trigger batch sync from root; NodeDiscoveryService auto-adds cl:indexed to root
+resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+  -H 'Content-Type: application/json' \
+  -d "{\"folders\":[\"$HIER_ROOT_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
+  2>/dev/null || echo '{}')
+hier_job_id=$(echo "$resp" | jq -r '.jobId // empty')
+if [ -z "$hier_job_id" ]; then
+  fail "I5: Sync trigger returned no jobId (response: $resp)"
+else
+  pass "I5: Sync triggered — jobId=$hier_job_id"
+  elapsed=0
+  hier_status="UNKNOWN"
+  while [ $elapsed -lt 300 ]; do
+    sr=$(curl -sf -u "$ALF_AUTH" "$SYNC_URL/status/$hier_job_id" 2>/dev/null || echo '{}')
+    hier_status=$(echo "$sr" | jq -r '.status // "UNKNOWN"')
+    case "$hier_status" in
+      COMPLETED)
+        processed=$(echo "$sr" | jq -r '.metadataIngestedCount // .processedCount // "?"')
+        pass "I6: Sync COMPLETED (metadataIngestedCount=$processed)"
+        break
+        ;;
+      FAILED|ERROR)
+        fail "I6: Sync job FAILED — $(echo "$sr" | jq -c '{status,failedCount,discoveredCount}')"
+        break
+        ;;
+    esac
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  [ $elapsed -ge 300 ] && fail "I6: Sync timed out after 5 min (last status=$hier_status)"
+fi
+
+info "Waiting 60 s for embedding pipeline …"
+sleep 60
+
+# I7: Documents at root and level1 must be indexed
+rag_find_node "zephyr-cobalt-lambda-00r root level in-scope"   "$DOC_L0_ID" "I7a" "hier-doc-l0.txt (root — in scope)"
+rag_find_node "zephyr-cobalt-lambda-11r level one in-scope"    "$DOC_L1_ID" "I7b" "hier-doc-l1.txt (level1 — in scope)"
+
+# I8: Documents at level2 and level3 must not be indexed (excluded subtree)
+rag_absent_node "zephyr-cobalt-lambda-22r level two excluded"           "$DOC_L2_ID" "I8a" "hier-doc-l2.txt (level2 — cl:excludeFromLake)"
+rag_absent_node "zephyr-cobalt-lambda-33r level three ancestor-excluded" "$DOC_L3_ID" "I8b" "hier-doc-l3.txt (level3 — ancestor excluded)"
+
+fi  # end HIER_ROOT_ID != NONE block
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Summary

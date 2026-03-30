@@ -98,7 +98,9 @@ Shared project name, network, and named volumes stay in the root file.
 The following Alfresco-side services are non-negotiable for Content Lake to work:
 
 - **Alfresco Repository** with the `content-lake-repo-model` module installed so `cl:indexed` and
-  `cl:excludeFromLake` aspects exist. The ACS image is built locally in `acs/alfresco/`.
+  `cl:excludeFromLake` aspects exist. The same module now also contains the repository-side ACL
+  reconciliation hook that publishes permission changes to a persistent ActiveMQ queue. The ACS
+  image is built locally in `acs/alfresco/`.
 - **ActiveMQ** configured for Alfresco Event2 so `live-ingester` can consume `alfresco.repo.event2`
 - **Alfresco Transform Core AIO** for text extraction during ingestion
 - **Alfresco Search Services / Solr** wired with `secureComms=secret`
@@ -151,8 +153,29 @@ If you run `docker compose` directly: `STACK_MODE=alfresco docker compose --env-
 | `MODEL_RUNNER_URL` | `http://model-runner.docker.internal` | LLM inference backend |
 | `EMBEDDING_MODEL` | `ai/mxbai-embed-large` | Embedding model |
 | `LLM_MODEL` | `ai/qwen2.5` | LLM for RAG |
+| `CONTENT_LAKE_PERMISSION_SYNC_ENABLED` | `true` | Enable the Alfresco repository-side ACL publisher |
+| `CONTENT_LAKE_PERMISSION_SYNC_BROKER_URL` | `tcp://activemq:61616` | ActiveMQ broker used for ACL change messages |
+| `CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME` | `contentlake.acl.changed` | Persistent queue consumed transactionally by `batch-ingester` |
 
 On Linux, override `MODEL_RUNNER_URL` to `http://host.docker.internal:12434` in `.env.local`.
+
+### Automatic ACL Reconciliation
+
+When `CONTENT_LAKE_PERMISSION_SYNC_ENABLED=true`, Alfresco Repository records permission-affecting
+changes after commit and publishes a persistent ActiveMQ message to
+`CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME`. `batch-ingester` consumes that queue and runs the same
+ACL reconciliation logic exposed by `POST /api/sync/permissions`. This is the primary production
+path for Alfresco ACL propagation because repository permission updates are not reliably emitted as
+Event2 messages.
+
+This catches permission changes made through:
+
+- Alfresco UI
+- Alfresco REST API
+- repository-side rules, scripts, or admin tools
+
+This flow is eventually consistent. A permission revocation is visible to search only after the
+repository addon has published the queue message and `batch-ingester` has updated hxpr.
 
 ---
 

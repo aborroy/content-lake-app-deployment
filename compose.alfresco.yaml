@@ -78,6 +78,11 @@ services:
         -Dhttpclient.config.transform.connectionRequestTimeout=500000
         -Dalfresco.restApi.basicAuthScheme=true
         -Dauthentication.protection.enabled=false
+        -Dcontent.lake.permission.sync.enabled=${CONTENT_LAKE_PERMISSION_SYNC_ENABLED:-true}
+        -Dcontent.lake.permission.sync.broker-url=${CONTENT_LAKE_PERMISSION_SYNC_BROKER_URL:-tcp://activemq:61616}
+        -Dcontent.lake.permission.sync.broker-user=${ACTIVEMQ_USER:-admin}
+        -Dcontent.lake.permission.sync.broker-password=${ACTIVEMQ_PASSWORD:-admin}
+        -Dcontent.lake.permission.sync.queue-name=${CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME:-contentlake.acl.changed}
         -XX:+UseG1GC -XX:+UseStringDeduplication
         -Dgoogledocs.enabled=false
         -Ddev.email.not.sent=true
