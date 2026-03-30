@@ -68,14 +68,48 @@ On Linux, override `MODEL_RUNNER_URL` (set as `spring.ai.openai.base-url`) to
 
 ---
 
+## Authentication
+
+All `/api/rag/**` endpoints except `/api/rag/health` require **HTTP Basic Auth**. Credentials are
+validated against the configured content source(s):
+
+1. **Alfresco** — via `POST .../authentication/versions/1/tickets` (tried first)
+2. **Nuxeo** — via `GET .../api/v1/me` (tried if Alfresco is unreachable or unconfigured)
+
+The authenticated username is then used to resolve the caller's group memberships (via the service
+account) and build the `sys_racl` permission filter passed to hxpr. This ensures search results are
+scoped to documents the caller is actually allowed to read.
+
+`/api/rag/health` and `/actuator/**` are public (no credentials required).
+
+### Unauthenticated requests
+
+Requests without a valid `Authorization: Basic ...` header receive **HTTP 401**.
+
+```bash
+# Correct — with credentials
+curl -u admin:admin -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "retention policy", "topK": 5}'
+
+# Rejected — no credentials → 401
+curl -X POST http://localhost/api/rag/search/semantic \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "retention policy", "topK": 5}'
+```
+
+---
+
 ## REST API
 
-All endpoints are under `/api/rag/` (proxied through nginx).
+All endpoints are under `/api/rag/` (proxied through nginx). Include Basic Auth on every request
+(see [Authentication](#authentication) above).
 
 ### Semantic search
 
 ```http
 POST /api/rag/search/semantic
+Authorization: Basic <base64(user:password)>
 Content-Type: application/json
 
 {
@@ -89,6 +123,7 @@ Content-Type: application/json
 
 ```http
 POST /api/rag/search/hybrid
+Authorization: Basic <base64(user:password)>
 Content-Type: application/json
 
 {
@@ -101,6 +136,7 @@ Content-Type: application/json
 
 ```http
 POST /api/rag/prompt
+Authorization: Basic <base64(user:password)>
 Content-Type: application/json
 
 {
@@ -113,6 +149,7 @@ Content-Type: application/json
 
 ```http
 POST /api/rag/chat/stream
+Authorization: Basic <base64(user:password)>
 Content-Type: application/json
 Accept: text/event-stream
 
@@ -122,20 +159,25 @@ Accept: text/event-stream
 }
 ```
 
+### Health check (public)
+
+```http
+GET /api/rag/health
+```
+
 ---
 
 ## Security
 
-The `rag-service` needs its own `SecurityConfig`. Current options:
+`RagSecurityConfig` enforces HTTP Basic Auth for all search and prompt endpoints. The
+`MultiSourceAuthenticationProvider` validates incoming credentials by calling the upstream
+repository (Alfresco tickets API, then Nuxeo `/me`) with a 3 s connect timeout. Connection
+failures are treated as "source unavailable" and the next source is tried; if all sources fail
+or reject the credentials, a `401 Unauthorized` is returned.
 
-**Option A (recommended for initial phase):** Permit-all behind network policy. The proxy and
-network topology prevent direct public access to the rag-service port.
-
-**Option B:** OAuth2/OIDC via the hxpr IDP. Requires configuring the rag-service as an OAuth2
-resource server and issuing tokens through Keycloak.
-
-The Alfresco-specific `SecurityConfig` (in `content-lake-source-alfresco`) does not apply to
-`rag-service`. A minimal standalone `SecurityConfig` must be present in the `rag-service` module.
+The service account credentials (`ALFRESCO_INTERNAL_USERNAME` / `ALFRESCO_INTERNAL_PASSWORD`,
+`NUXEO_USERNAME` / `NUXEO_PASSWORD`) are used only for internal operations (group membership
+lookups, metadata enrichment) — they are never used to validate incoming requests.
 
 ---
 
@@ -147,7 +189,7 @@ source" link using `source_type` from `cin_ingestProperties`:
 - `alfresco` → Alfresco Share URL: `{alfrescoBaseUrl}/share/page/document-details?nodeRef=workspace://...`
 - `nuxeo` → Nuxeo Web UI URL: `{nuxeoBaseUrl}/nuxeo/ui/#!/doc/{uid}`
 
-Permission filtering (`sys_acl`) works at the hxpr level and is already multi-source aware.
+Permission filtering (`sys_racl`) works at the hxpr level and is already multi-source aware.
 
 ---
 
