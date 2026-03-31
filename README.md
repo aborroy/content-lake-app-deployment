@@ -28,6 +28,11 @@ For any mode that includes Nuxeo (`full` or `nuxeo`), clone `nuxeo-deployment` a
 directory at `../nuxeo-deployment` and start it separately. No other sibling checkout is required
 unless you intentionally override the remote build contexts with local paths.
 
+Important: `STACK_MODE=nuxeo` does not start the Nuxeo server itself. The proxy forwards
+`/nuxeo/*` to `http://host.docker.internal:8081/nuxeo`, so if `../nuxeo-deployment` is not
+running you will get `502 Bad Gateway` on `http://localhost/nuxeo/` or
+`http://localhost/nuxeo/ui`.
+
 ## Compose Layout
 
 The root entrypoint is [compose.yaml](compose.yaml), which uses Docker Compose `include` to pull in:
@@ -58,8 +63,8 @@ flowchart LR
   subgraph ACL["content-lake-app"]
     Proxy["proxy"]
     ContentApp["content-app"]
-    Batch["batch-ingester"]
-    Live["live-ingester"]
+    Batch["alfresco-batch-ingester"]
+    Live["alfresco-live-ingester"]
     NuxeoBatch["nuxeo-batch-ingester"]
     NuxeoLive["nuxeo-live-ingester"]
     Rag["rag-service"]
@@ -291,9 +296,9 @@ Use the following values:
 5. Start the desired stack mode:
 
    ```bash
-   STACK_MODE=alfresco docker compose up --build
-   STACK_MODE=full docker compose up --build      # also enables Nuxeo ingesters/routes
-   STACK_MODE=nuxeo docker compose up --build     # Nuxeo-only, no ACA/Alfresco services
+   STACK_MODE=alfresco make up
+   STACK_MODE=full make up      # also enables Nuxeo ingesters/routes
+   STACK_MODE=nuxeo make up     # Nuxeo-only, no ACA/Alfresco services
    ```
 
 Once healthy, open [http://localhost](http://localhost).
@@ -308,6 +313,9 @@ STACK_MODE=full make up
 # or:
 STACK_MODE=nuxeo make up
 ```
+
+If `http://localhost/nuxeo/ui` returns `502 Bad Gateway`, check that `../nuxeo-deployment` is
+running and that the Nuxeo server is reachable on `http://localhost:8081/nuxeo`.
 
 ## Public Endpoints
 
