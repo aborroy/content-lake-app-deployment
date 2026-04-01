@@ -56,7 +56,7 @@ services:
       NUXEO_USERNAME: ${NUXEO_USERNAME:-Administrator}
       NUXEO_PASSWORD: ${NUXEO_PASSWORD:-Administrator}
       NUXEO_SOURCE_ID: ${NUXEO_SOURCE_ID:-local}
-      NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces/content-lake-demo}
+      NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces}
       NUXEO_DISCOVERY_MODE: ${NUXEO_DISCOVERY_MODE:-CHILDREN}
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
@@ -132,7 +132,7 @@ services:
       NUXEO_SOURCE_ID: ${NUXEO_SOURCE_ID:-local}
       NUXEO_LIVE_AUDIT_ENABLED: ${NUXEO_LIVE_AUDIT_ENABLED:-true}
       NUXEO_LIVE_AUDIT_CURSOR_FILE: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:-/data/audit-cursor.json}
-      NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces/content-lake-demo}
+      NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces}
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
       HXPR_TARGET_PATH: ${HXPR_NUXEO_TARGET_PATH:-/nuxeo-sync}
