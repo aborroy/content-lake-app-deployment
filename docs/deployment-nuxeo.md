@@ -109,9 +109,14 @@ Do not use embedded Apache Tika in the main adapter path.
 
 ---
 
-## Scope Resolution (MVP)
+## Scope Resolution
 
-`NuxeoScopeResolver` uses config-only scope. Set in `application.yml`:
+Content Lake uses a **hybrid scope model**: configuration provides the fallback root paths and
+document types; per-folder facets provide dynamic runtime control without a service restart.
+
+### Configuration fallback
+
+Set in `application.yml`:
 
 ```yaml
 nuxeo:
@@ -123,7 +128,59 @@ nuxeo:
       - Note
 ```
 
-A schema-based approach (custom facet equivalent to Alfresco's `cl:indexed`) is a follow-up.
+Documents that fall under a configured root and match an included type are in scope unless
+overridden by facets.
+
+### Facets
+
+Two custom facets are registered by `nuxeo-deployment/config/content-lake-facets-contrib.xml`:
+
+| Facet | Schema | Purpose |
+|---|---|---|
+| `ContentLakeIndexed` | none (marker) | Marks a folder and its entire subtree as in scope |
+| `ContentLakeScope` | `contentLakeScope` (`cls` prefix) | Carries `cls:excludeFromScope` (boolean); when `true`, excludes the node and subtree even if an ancestor has `ContentLakeIndexed` |
+
+`NuxeoScopeResolver` checks for `ContentLakeIndexed` on ancestor folders first; if none is found
+it falls back to `includedRoots`. Exclusion via `cls:excludeFromScope` is evaluated last and
+overrides any ancestor inclusion.
+
+### Setting facets through the Nuxeo Web UI
+
+The custom Polymer element `content-lake-folder-control` is injected into the Nuxeo Web UI
+document toolbar (`DOCUMENT_ACTIONS` slot). It renders only on Folderish documents.
+
+**To enable a folder for Content Lake ingestion:**
+
+1. Log in to the Nuxeo Web UI and navigate to the folder.
+2. Click the **Content Lake** icon (`device-hub`) in the document toolbar.
+3. In the dialog, switch on **Index in Content Lake**. This adds the `ContentLakeIndexed` facet
+   and automatically triggers a folder backfill (`POST /api/sync/batch?sourceType=nuxeo`).
+
+**To exclude a sub-folder from an indexed tree:**
+
+1. Navigate to the sub-folder inside an indexed folder.
+2. Click the **Content Lake** icon in the toolbar.
+3. Switch on **Exclude from Content Lake**. This adds `ContentLakeScope` and sets
+   `cls:excludeFromScope=true`.
+
+**Visual indicator:** The toolbar icon is highlighted in the primary action colour when
+`ContentLakeIndexed` is present, and unstyled otherwise.
+
+### Setting facets via REST
+
+```bash
+# Add ContentLakeIndexed to a folder
+curl -u Administrator:Administrator \
+  -H 'Content-Type: application/json' \
+  -X PUT 'http://localhost:8081/nuxeo/api/v1/id/{uid}' \
+  -d '{"entity-type":"document","facets":["ContentLakeIndexed"]}'
+
+# Trigger a backfill for the folder subtree
+curl -u Administrator:Administrator \
+  -H 'Content-Type: application/json' \
+  -X POST 'http://localhost/api/sync/batch?sourceType=nuxeo' \
+  -d '{"includedRoots":["/default-domain/workspaces/my-folder"],"includedDocumentTypes":["File","Note"],"excludedLifecycleStates":["deleted"],"pageSize":50,"discoveryMode":"CHILDREN"}'
+```
 
 ---
 
