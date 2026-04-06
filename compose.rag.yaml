@@ -231,6 +231,8 @@ services:
       RAG_DEFAULT_TOP_K: "5"
       RAG_DEFAULT_MIN_SCORE: "0.5"
       RAG_MAX_CONTEXT_LENGTH: "12000"
+      RAG_SOURCE_LINKS_ALFRESCO_TEMPLATE: "/aca/#/search/(viewer:view/{nodeId})?location=%2Frag"
+      RAG_SOURCE_LINKS_NUXEO_TEMPLATE: "/nuxeo/ui/#!/browse{nuxeoPath}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
