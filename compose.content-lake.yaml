@@ -151,6 +151,11 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      alfresco:
+        condition: service_healthy
+      hxpr-app:
+        condition: service_healthy
     networks:
       - stack
 
