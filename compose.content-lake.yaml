@@ -1,7 +1,7 @@
 # compose.content-lake.yaml — Content Lake ingestion and RAG services
 # Part of the content-lake-app stack; loaded via include: in compose.yaml.
-# Profiles: alfresco, full, demo (Alfresco ingesters); nuxeo, full, demo (Nuxeo ingesters);
-#           extras (live ingesters); all profiles (rag-service)
+# Profiles: alfresco, full, demo (Alfresco ingesters + live ingester); nuxeo, full, demo (Nuxeo ingesters + live ingester);
+#           all profiles (rag-service)
 
 services:
 
@@ -83,9 +83,9 @@ services:
     networks:
       - stack
 
-  # extras: Alfresco live ingester (real-time event-driven sync via ActiveMQ)
+  # Alfresco live ingester (real-time event-driven sync via ActiveMQ)
   live-ingester:
-    profiles: [extras]
+    profiles: [alfresco, full, demo]
     build:
       context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
       dockerfile_inline: |

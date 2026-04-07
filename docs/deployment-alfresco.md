@@ -86,7 +86,7 @@ Root entrypoint is `compose.yaml`, which uses `include:` to pull in:
 |---|---|
 | `compose.alfresco.yaml` | postgres, activemq, alfresco, transform-core-aio, solr6\*, share\*, control-center\* |
 | `compose.hxpr.yaml` | hxpr-app, mongodb, opensearch, idp, localstack, mockoon, router, rest, aio, opensearch-dashboards\* |
-| `compose.content-lake.yaml` | batch-ingester, live-ingester\*, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester |
+| `compose.content-lake.yaml` | batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester |
 | `compose.ui.yaml` | content-app, content-lake-app-ui (demo only), proxy |
 
 \* `extras` profile only. Shared project name, network, and named volumes are declared in the root file.
