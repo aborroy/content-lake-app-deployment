@@ -1,6 +1,6 @@
 # compose.hxpr.yaml — HXPR platform services
 # Part of the content-lake-app stack; loaded via include: in compose.yaml.
-# Profiles: alfresco, nuxeo, full, demo (core); extras (OpenSearch Dashboards)
+# Profiles: alfresco, nuxeo, full, demo
 
 services:
 
@@ -46,9 +46,8 @@ services:
     networks:
       - stack
 
-  # extras: OpenSearch Dashboards — operational visibility
   opensearch-dashboards:
-    profiles: [extras]
+    profiles: [alfresco, nuxeo, full, demo]
     image: opensearchproject/opensearch-dashboards:${OPENSEARCH_TAG:-3.5.0}
     ports:
       - "5601:5601"

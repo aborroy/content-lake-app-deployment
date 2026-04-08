@@ -1,6 +1,6 @@
 # compose.alfresco.yaml — Alfresco content services
 # Part of the content-lake-app stack; loaded via include: in compose.yaml.
-# Profiles: alfresco, full, demo (core); extras (Share, Control Center, Solr)
+# Profiles: alfresco, full, demo
 
 services:
 
@@ -104,9 +104,8 @@ services:
     networks:
       - stack
 
-  # extras: Solr full-text index (Alfresco works without it for RAG use cases)
   solr6:
-    profiles: [extras]
+    profiles: [alfresco, full, demo]
     image: alfresco/alfresco-search-services:${SEARCH_CE_TAG:-2.0.17}
     environment:
       SOLR_ALFRESCO_HOST: alfresco
@@ -133,27 +132,9 @@ services:
     networks:
       - stack
 
-  # extras: Alfresco Share UI
-  share:
-    profiles: [extras]
-    image: alfresco/alfresco-share:${SHARE_TAG:-25.3.0}
-    environment:
-      CSRF_FILTER_ORIGIN: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}
-      CSRF_FILTER_REFERER: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}/share/.*
-      REPO_HOST: alfresco
-      REPO_PORT: "8080"
-      JAVA_OPTS: >-
-        -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
-        -Dalfresco.host=${SERVER_NAME:-localhost}
-        -Dalfresco.port=${PUBLIC_PORT:-80}
-        -Dalfresco.context=alfresco
-        -Dalfresco.protocol=http
-    networks:
-      - stack
-
-  # extras: Alfresco Admin Control Center
+  # Alfresco Admin Control Center
   control-center:
-    profiles: [extras]
+    profiles: [alfresco, full, demo]
     image: quay.io/alfresco/alfresco-control-center:${CONTROL_CENTER_TAG:-10.2.0}
     environment:
       APP_CONFIG_ECM_HOST: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}

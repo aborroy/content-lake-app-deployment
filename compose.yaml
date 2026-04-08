@@ -34,8 +34,6 @@ secrets:
 #   nuxeo     — Nuxeo source only
 #   full      — Alfresco + Nuxeo (core)
 #   demo      — full + standalone demo UI at /
-#   extras    — Optional add-ons: Solr, Share, Admin Center, live sync, dashboards
-#               Combine with any profile: --profile alfresco --profile extras
 
 include:
   - compose.alfresco.yaml

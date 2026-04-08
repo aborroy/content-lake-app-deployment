@@ -25,16 +25,9 @@ The stack supports four source profiles. Start with `alfresco` if you only have 
 
 ```bash
 make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~17 services)
-make up-alfresco-full  # same + Share, Admin Center, Solr, live sync  (~22 services)
 make up-nuxeo          # Nuxeo + HXPR + RAG  (~13 services)
 make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~19 services)
 make up-demo           # full + standalone demo UI at /  (~20 services)
-```
-
-The `extras` profile adds optional services (Share, Control Center, Solr, OpenSearch Dashboards) to any base profile:
-
-```bash
-docker compose --profile alfresco --profile extras up --build -d
 ```
 
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
@@ -96,9 +89,8 @@ flowchart LR
 
   subgraph ACS["Alfresco"]
     Alfresco["alfresco"]
-    Share["share (extras)"]
-    ControlCenter["control-center (extras)"]
-    Solr["solr6 (extras)"]
+    ControlCenter["control-center"]
+    Solr["solr6"]
     Postgres["postgres"]
     ActiveMQ["activemq"]
     Transform["transform-core-aio"]
@@ -113,7 +105,7 @@ flowchart LR
     HxprApp["hxpr-app"]
     Mongo["mongodb"]
     OpenSearch["opensearch"]
-    OSD["opensearch-dashboards (extras)"]
+    OSD["opensearch-dashboards"]
     Idp["idp"]
     Localstack["localstack"]
     Mockoon["mockoon"]
@@ -127,7 +119,6 @@ flowchart LR
   Proxy --> ContentApp
   Proxy --> DemoUi
   Proxy --> Alfresco
-  Proxy --> Share
   Proxy --> ControlCenter
   Proxy --> Batch
   Proxy --> NuxeoBatch
@@ -136,7 +127,6 @@ flowchart LR
 
   ContentApp --> Alfresco
   DemoUi --> Proxy
-  Share --> Alfresco
   ControlCenter --> Alfresco
   Alfresco --> Postgres
   Alfresco --> Solr
@@ -192,13 +182,12 @@ flowchart LR
 
 Notes:
 
-- `proxy` is the only public entrypoint for Alfresco, Share, the UI, batch/sync APIs, and RAG APIs.
+- `proxy` is the only public entrypoint for Alfresco, the UI, batch/sync APIs, and RAG APIs.
 - `content-app` is exposed at `/aca/` in every profile where it is present (`alfresco`, `full`, `demo`).
 - In `alfresco` and `full` profiles, `/` redirects to `/aca/`.
 - In `demo` profile, `content-lake-app-ui` serves `/` and ACA remains at `/aca/`.
 - In `nuxeo` profile, `/` redirects to `/nuxeo/`.
 - The Nuxeo routes are active in `nuxeo`, `full`, and `demo` profiles, and require `../nuxeo-deployment` to be running.
-- Services marked `(extras)` (Share, Control Center, Solr, OpenSearch Dashboards) only start when the `extras` profile is also active.
 - `opensearch-dashboards` is published separately on port `5601`, not through `proxy`.
 - Docker Model Runner is an external dependency used by the Content Lake services, not a Compose service in this repository.
 
@@ -334,14 +323,13 @@ Only the proxy is published on the host on port `80`.
 | `http://localhost/` | Redirects to `/aca/` (alfresco/full), `/nuxeo/` (nuxeo), or demo UI (demo) |
 | `http://localhost/aca/` | alfresco, full, demo |
 | `http://localhost/alfresco/` | alfresco, full, demo |
-| `http://localhost/share/` | extras |
-| `http://localhost/admin/` | extras |
+| `http://localhost/admin/` | alfresco, full, demo |
 | `http://localhost/api-explorer/` | alfresco, full, demo |
 | `http://localhost/nuxeo/` | nuxeo, full, demo |
 | `http://localhost/api/rag/` | all profiles |
 | `http://localhost/api/content-lake/` | alfresco, full, demo |
 | `http://localhost/api/sync/` | all profiles (routes to alfresco or nuxeo ingester via `?sourceType=`) |
-| `http://localhost:5601/` | extras |
+| `http://localhost:5601/` | alfresco, nuxeo, full, demo |
 
 ## Nuxeo Demo Content
 
@@ -400,7 +388,6 @@ On Linux, override `MODEL_RUNNER_URL=http://host.docker.internal:12434` in `.env
 
 ```bash
 make up-alfresco      # build and start Alfresco profile
-make up-alfresco-full # build and start Alfresco + extras
 make up-nuxeo         # build and start Nuxeo profile
 make up-full          # build and start full profile
 make up-demo          # build and start demo profile
@@ -423,7 +410,6 @@ See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running
 - HXPR source build requires both GitHub Packages credentials and Hyland Nexus credentials, passed as Compose build secrets sourced from environment variables.
 - All Content Lake Java services (`batch-ingester`, `live-ingester`, ingesters, `rag-service`) build from source fetched directly from GitHub — no local Java checkout needed.
 - The repository model is injected directly into the Alfresco image from this repo.
-- Share, Solr, Admin Center, and OpenSearch Dashboards are grouped under the `extras` profile and are not started by default. Use `make up-alfresco-full` or `--profile extras` to include them.
 - The ACA UI is exposed at `/aca/` in every profile where it is enabled, so its context path stays stable across stacks.
 - The demo UI (`content-lake-app-ui`) is served at `/` only in the `demo` profile.
 

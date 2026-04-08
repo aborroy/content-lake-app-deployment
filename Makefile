@@ -3,7 +3,6 @@
 # =============================================================
 # Usage:
 #   make up-alfresco        Alfresco + HXPR + RAG + ACA UI  (~17 services)
-#   make up-alfresco-full   Same + Share, Admin, Solr, live sync, dashboards (~22)
 #   make up-nuxeo           Nuxeo + HXPR + RAG  (~13 services)
 #   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~19 services)
 #   make up-demo            Full + standalone demo UI at /  (~20 services)
@@ -27,7 +26,7 @@ endif
 
 DC := $(LOAD_ENV) docker compose $(ENV_ARGS)
 
-.PHONY: help up-alfresco up-alfresco-full up-nuxeo up-full up-demo down logs ps config clean
+.PHONY: help up-alfresco up-nuxeo up-full up-demo down logs ps config clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
@@ -39,14 +38,6 @@ up-alfresco: ## Alfresco source — core services (~17)
 	  NGINX_ROOT_DIRECTIVE="return 302 /aca/;" \
 	  RAG_PERMISSION_SOURCE_IDS="$${RAG_PERMISSION_SOURCE_IDS:-$${HXPR_REPOSITORY_ID:-default}}" \
 	  docker compose $(ENV_ARGS) --profile alfresco up --build -d
-	@$(call _urls,alfresco)
-
-up-alfresco-full: ## Alfresco source — core + Share, Admin, Solr, live sync (~22)
-	$(LOAD_ENV) \
-	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
-	  NGINX_ROOT_DIRECTIVE="return 302 /aca/;" \
-	  RAG_PERMISSION_SOURCE_IDS="$${RAG_PERMISSION_SOURCE_IDS:-$${HXPR_REPOSITORY_ID:-default}}" \
-	  docker compose $(ENV_ARGS) --profile alfresco --profile extras up --build -d
 	@$(call _urls,alfresco)
 
 up-nuxeo: ## Nuxeo source — start ../nuxeo-deployment first, then this
