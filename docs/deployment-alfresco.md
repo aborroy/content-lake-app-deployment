@@ -153,11 +153,19 @@ If you run `docker compose` directly: `STACK_MODE=alfresco docker compose --env-
 | `MODEL_RUNNER_URL` | `http://model-runner.docker.internal` | LLM inference backend |
 | `EMBEDDING_MODEL` | `ai/mxbai-embed-large` | Embedding model |
 | `LLM_MODEL` | `ai/qwen2.5` | LLM for RAG |
+| `ACTIVEMQ_USER` | `admin` | ActiveMQ broker username used by the broker, ACS repository, and transform-core-aio |
+| `ACTIVEMQ_PASSWORD` | `admin` | ActiveMQ broker password used by the broker, ACS repository, and transform-core-aio |
 | `CONTENT_LAKE_PERMISSION_SYNC_ENABLED` | `true` | Enable the Alfresco repository-side ACL publisher |
 | `CONTENT_LAKE_PERMISSION_SYNC_BROKER_URL` | `tcp://activemq:61616` | ActiveMQ broker used for ACL change messages |
 | `CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME` | `contentlake.acl.changed` | Persistent queue consumed transactionally by `batch-ingester` |
 
 On Linux, override `MODEL_RUNNER_URL` to `http://host.docker.internal:12434` in `.env.local`.
+
+With ACS `26.1.x`, the ActiveMQ broker credentials must be propagated consistently. The `activemq`
+service uses `ACTIVEMQ_ADMIN_LOGIN` / `ACTIVEMQ_ADMIN_PASSWORD`, while the repository client needs
+`messaging.broker.username` / `messaging.broker.password`, and `transform-core-aio` needs
+`ACTIVEMQ_USER` / `ACTIVEMQ_PASSWORD`. Leaving only the broker image pinned without wiring those
+client settings causes repository or transform startup failures against the authenticated broker.
 
 ### Automatic ACL Reconciliation
 

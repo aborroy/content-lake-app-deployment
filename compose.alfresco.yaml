@@ -25,6 +25,20 @@ services:
   activemq:
     profiles: [alfresco, full, demo]
     image: alfresco/alfresco-activemq:${ACTIVEMQ_TAG:-5.18-jre17-rockylinux8}
+    environment:
+      ACTIVEMQ_ADMIN_LOGIN: ${ACTIVEMQ_USER:-admin}
+      ACTIVEMQ_ADMIN_PASSWORD: ${ACTIVEMQ_PASSWORD:-admin}
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - --user
+        - ${ACTIVEMQ_USER:-admin}:${ACTIVEMQ_PASSWORD:-admin}
+        - http://localhost:8161/admin/
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - stack
 
@@ -69,6 +83,8 @@ services:
         -Dshare.protocol=http
         -Daos.baseUrlOverwrite=http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}/alfresco/aos
         -Dmessaging.broker.url="failover:(nio://activemq:61616)?timeout=3000&jms.useCompression=true"
+        -Dmessaging.broker.username=${ACTIVEMQ_USER:-admin}
+        -Dmessaging.broker.password=${ACTIVEMQ_PASSWORD:-admin}
         -Ddeployment.method=DOCKER_COMPOSE
         -Dcsrf.filter.enabled=false
         -Dopencmis.server.override=true
@@ -90,6 +106,8 @@ services:
       - alf-repo-data:/usr/local/tomcat/alf_data
     depends_on:
       postgres:
+        condition: service_healthy
+      activemq:
         condition: service_healthy
     healthcheck:
       test:
@@ -125,10 +143,16 @@ services:
     profiles: [alfresco, full, demo]
     image: alfresco/alfresco-transform-core-aio:${TRANSFORM_ENGINE_TAG:-5.2.4}
     environment:
+      ACTIVEMQ_URL: nio://activemq:61616
+      ACTIVEMQ_USER: ${ACTIVEMQ_USER:-admin}
+      ACTIVEMQ_PASSWORD: ${ACTIVEMQ_PASSWORD:-admin}
       JAVA_OPTS: >-
         -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
         -Dlogging.level.org.alfresco.transform=ERROR
         -Dlogging.level.org.alfresco.transform.router=ERROR
+    depends_on:
+      activemq:
+        condition: service_healthy
     networks:
       - stack
 
