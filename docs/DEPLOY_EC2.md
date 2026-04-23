@@ -318,3 +318,173 @@ docker model ls
 ```
 
 With 24 GB VRAM, `ai/gpt-oss` (~13 GB) and `ai/mxbai-embed-large` (~0.7 GB) leave ~10 GB headroom — no evictions, no cold starts.
+
+## 17. High-Concurrency Mode: vLLM + TEI
+
+### When to use this
+
+Docker Model Runner (the default) processes inference requests **serially** — one at a time. Under concurrent load (multiple users querying simultaneously, or a quality-measurement program that also ingests content), requests pile up in a queue. The symptom is `docker-model-runner` CPU spiking above 200% while GPU utilisation stays low: the GPU finishes a request quickly but the next one has not been dispatched yet.
+
+**vLLM** replaces the LLM backend with *continuous batching*: multiple in-flight requests are fused into a single GPU kernel dispatch, giving 3–5× throughput improvement at the same hardware cost. **HuggingFace TEI** does the same for embeddings — relevant here because ingestion jobs (batch and live ingesters) and RAG queries both hit the embedding endpoint concurrently.
+
+### How it works (no stack changes required)
+
+A lightweight nginx proxy listens on port **12434** — the same port Docker Model Runner occupies on Linux. It routes by path:
+
+```
+compose services → http://host.docker.internal:12434  (nginx proxy)
+                         ├── /v1/embeddings  → TEI   :8080
+                         └── /v1/*           → vLLM  :8000
+```
+
+Because the proxy mirrors the existing port, `MODEL_RUNNER_URL=http://host.docker.internal:12434` in `.env.local` does **not** change. No compose files, no Java code, and no `.env` defaults are modified.
+
+All three containers (`tei`, `vllm`, `ai-proxy`) run with `--network host` so they reach each other via `127.0.0.1` and are reachable from inside the compose network via `host.docker.internal`.
+
+### VRAM budget (T4, 16 GB)
+
+| Container | Model | Approx. VRAM |
+|-----------|-------|--------------|
+| vLLM | `Qwen/Qwen2.5-3B-Instruct-AWQ` (4-bit AWQ, same family as `ai/qwen2.5`) | ~9.6 GB at `--gpu-memory-utilization 0.60` (model + KV cache) |
+| TEI | `mixedbread-ai/mxbai-embed-large-v1` (same weights as `ai/mxbai-embed-large`) | ~0.7 GB |
+| **Total** | | **~10.3 GB** — ~5.7 GB headroom |
+
+### Step 1 — Stop Docker Model Runner
+
+```bash
+sudo systemctl stop docker-model-runner
+# Or, if the systemd unit is not present:
+docker model stop --all 2>/dev/null || true
+```
+
+> Docker Model Runner is no longer needed once the proxy is running. Stopping it frees the CPU
+> overhead it consumes even when idle and ensures nothing else claims port 12434.
+
+### Step 2 — Create the nginx routing config
+
+```bash
+sudo mkdir -p /opt/ai-proxy
+sudo tee /opt/ai-proxy/nginx.conf > /dev/null << 'EOF'
+events {}
+http {
+  server {
+    listen 12434;
+
+    # Embedding requests → TEI
+    location /v1/embeddings {
+      proxy_pass         http://127.0.0.1:8080;
+      proxy_read_timeout 120s;
+      proxy_send_timeout 120s;
+    }
+
+    # Everything else (chat, models list, …) → vLLM
+    location / {
+      proxy_pass         http://127.0.0.1:8000;
+      proxy_read_timeout 300s;
+      proxy_send_timeout 300s;
+    }
+  }
+}
+EOF
+```
+
+### Step 3 — Start TEI (embeddings)
+
+The T4 uses NVIDIA Turing architecture (SM75); the `turing-latest` TEI image is required.
+
+```bash
+docker run -d \
+  --name tei \
+  --gpus device=0 \
+  --network host \
+  --restart unless-stopped \
+  -v /opt/models:/data \
+  ghcr.io/huggingface/text-embeddings-inference:turing-latest \
+  --model-id mixedbread-ai/mxbai-embed-large-v1 \
+  --port 8080
+```
+
+> The model (~0.6 GB) is downloaded from HuggingFace on first start and cached in `/opt/models`.
+> No HuggingFace token is required — the model is public.
+
+### Step 4 — Start vLLM (LLM inference)
+
+```bash
+docker run -d \
+  --name vllm \
+  --gpus device=0 \
+  --network host \
+  --restart unless-stopped \
+  -v /opt/models:/root/.cache/huggingface \
+  vllm/vllm-openai:latest \
+  --model Qwen/Qwen2.5-3B-Instruct-AWQ \
+  --quantization awq \
+  --gpu-memory-utilization 0.60 \
+  --max-model-len 8192 \
+  --port 8000
+```
+
+> The model (~2 GB AWQ) is downloaded on first start and cached in `/opt/models`.
+> `--gpu-memory-utilization 0.60` reserves 9.6 GB for vLLM (model weights + KV cache),
+> leaving the remaining VRAM for TEI and system overhead.
+
+### Step 5 — Start the nginx proxy on port 12434
+
+```bash
+docker run -d \
+  --name ai-proxy \
+  --network host \
+  --restart unless-stopped \
+  -v /opt/ai-proxy/nginx.conf:/etc/nginx/nginx.conf:ro \
+  nginx:alpine
+```
+
+### Step 6 — No .env.local change needed
+
+`MODEL_RUNNER_URL=http://host.docker.internal:12434` already targets the port the nginx proxy
+occupies. Leave it unchanged.
+
+### Step 7 — Restart the AI-facing services
+
+```bash
+docker compose restart rag-service \
+  batch-ingester live-ingester \
+  nuxeo-batch-ingester nuxeo-live-ingester
+```
+
+### Verify the setup
+
+```bash
+# Both containers should show VRAM allocations that sum to ≤ 16 GB
+nvidia-smi
+
+# vLLM health
+curl http://localhost:8000/health
+
+# TEI health
+curl http://localhost:8080/health
+
+# Proxy routes — should return the vLLM model list
+curl http://localhost:12434/v1/models
+
+# End-to-end embedding via proxy
+curl -s -X POST http://localhost:12434/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"smoke test","model":"mixedbread-ai/mxbai-embed-large-v1"}' \
+  | grep -o '"object":"list"'
+
+# End-to-end chat via proxy
+curl -s -X POST http://localhost:12434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen/Qwen2.5-3B-Instruct-AWQ","messages":[{"role":"user","content":"ping"}],"max_tokens":5}' \
+  | grep -o '"object":"chat.completion"'
+```
+
+### Reverting to Docker Model Runner
+
+```bash
+docker stop ai-proxy tei vllm
+docker rm   ai-proxy tei vllm
+sudo systemctl start docker-model-runner
+# Or: docker model serve  (if using the CLI-managed daemon)
+```
