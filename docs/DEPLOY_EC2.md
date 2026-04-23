@@ -317,19 +317,19 @@ nvidia-smi
 docker model ls
 ```
 
-With 24 GB VRAM, `ai/gpt-oss` (~13 GB) and `ai/mxbai-embed-large` (~0.7 GB) leave ~10 GB headroom — no evictions, no cold starts.
+With 24 GB VRAM, `ai/gpt-oss` (~13 GB) and `ai/mxbai-embed-large` (~0.7 GB) leave ~10 GB headroom, no evictions, no cold starts.
 
 ## 17. High-Concurrency Mode: vLLM + TEI
 
 ### When to use this
 
-Docker Model Runner (the default) processes inference requests **serially** — one at a time. Under concurrent load (multiple users querying simultaneously, or a quality-measurement program that also ingests content), requests pile up in a queue. The symptom is `docker-model-runner` CPU spiking above 200% while GPU utilisation stays low: the GPU finishes a request quickly but the next one has not been dispatched yet.
+Docker Model Runner (the default) processes inference requests **serially** one at a time. Under concurrent load (multiple users querying simultaneously, or a quality-measurement program that also ingests content), requests pile up in a queue. The symptom is `docker-model-runner` CPU spiking above 200% while GPU utilisation stays low: the GPU finishes a request quickly but the next one has not been dispatched yet.
 
-**vLLM** replaces the LLM backend with *continuous batching*: multiple in-flight requests are fused into a single GPU kernel dispatch, giving 3–5× throughput improvement at the same hardware cost. **HuggingFace TEI** does the same for embeddings — relevant here because ingestion jobs (batch and live ingesters) and RAG queries both hit the embedding endpoint concurrently.
+**vLLM** replaces the LLM backend with *continuous batching*: multiple in-flight requests are fused into a single GPU kernel dispatch, giving 3–5× throughput improvement at the same hardware cost. **HuggingFace TEI** does the same for embeddings, relevant here because ingestion jobs (batch and live ingesters) and RAG queries both hit the embedding endpoint concurrently.
 
 ### How it works (no stack changes required)
 
-A lightweight nginx proxy listens on port **12434** — the same port Docker Model Runner occupies on Linux. It routes by path:
+A lightweight nginx proxy listens on port **12434**, the same port Docker Model Runner occupies on Linux. It routes by path:
 
 ```
 compose services → http://host.docker.internal:12434  (nginx proxy)
