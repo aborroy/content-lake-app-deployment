@@ -1,8 +1,13 @@
 # nginx.conf.template — substituted by envsubst at container startup.
 #
-# Two variables are injected by docker compose (set per Makefile target):
+# Variables injected by docker compose (set per Makefile target):
 #   NGINX_SYNC_DEFAULT_BACKEND  e.g. batch-ingester:9090 or nuxeo-batch-ingester:9093
 #   NGINX_ROOT_DIRECTIVE        e.g. "return 302 /aca/;"  or  "proxy_pass http://content-lake-app-ui:80;"
+#   SERVER_NAME                 e.g. localhost (default) or axovia.alfdemo.com
+#
+# HTTPS is handled by the compose entrypoint: when USE_HTTPS=true and
+# /etc/nginx/certs/server.crt exists the HTTP block emits a redirect to HTTPS
+# and the HTTPS block below is written into the final nginx.conf.
 
 worker_processes  1;
 
@@ -11,13 +16,12 @@ events {
 }
 
 http {
-    include       mime.types;
+    include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
 
     resolver 127.0.0.11 ipv6=off valid=30s;
 
     # Route /api/sync to the appropriate batch-ingester.
-    # Default backend is profile-dependent (NGINX_SYNC_DEFAULT_BACKEND).
     map $arg_sourceType $sync_backend {
         default  ${NGINX_SYNC_DEFAULT_BACKEND};
         ""       ${NGINX_SYNC_DEFAULT_BACKEND};
@@ -31,9 +35,15 @@ http {
         "nuxeo:" "Basic QWRtaW5pc3RyYXRvcjpBZG1pbmlzdHJhdG9y";
     }
 
+    # ── HTTP server ─────────────────────────────────────────────────────────────
+    # When USE_HTTPS=true the entrypoint injects "return 301 https://$host$request_uri;"
+    # immediately after the listen directive via the placeholder below.
     server {
 
         listen *:80;
+        server_name ${SERVER_NAME};
+
+        ##HTTPS_REDIRECT_PLACEHOLDER##
 
         client_max_body_size 0;
 
@@ -54,8 +64,6 @@ http {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_pass_header Set-Cookie;
 
-        # Upstreams as variables — nginx resolves at request time, not at startup.
-        # Services absent for the active profile simply return 502 if called.
         set $batch_ingester_upstream batch-ingester:9090;
         set $rag_service_upstream    rag-service:9091;
         set $control_center_upstream control-center:8080;
@@ -64,7 +72,6 @@ http {
         set $content_app_upstream    content-app:8080;
         set $demo_ui_upstream        content-lake-app-ui:80;
 
-        # Block direct Solr access
         location ~ ^(/.*/service/api/solr/.*)$             { return 403; }
         location ~ ^(/.*/s/api/solr/.*)$                   { return 403; }
         location ~ ^(/.*/wcservice/api/solr/.*)$           { return 403; }
@@ -72,7 +79,6 @@ http {
         location ~ ^(/.*/proxy/alfresco/api/solr/.*)$      { return 403; }
         location ~ ^(/.*/-default-/proxy/alfresco/api/.*)$ { return 403; }
 
-        # SSE chat stream — no retry-on-error, extended timeout, no cache
         location /api/rag/chat/stream {
             proxy_pass http://$rag_service_upstream;
             proxy_next_upstream off;
@@ -132,12 +138,131 @@ http {
             sub_filter 'src="/' 'src="/aca/';
         }
 
-        # Catch-all: behaviour is profile-dependent (NGINX_ROOT_DIRECTIVE).
-        #   alfresco/full → return 302 /aca/;
-        #   nuxeo         → return 302 /nuxeo/;
-        #   demo          → proxy_pass http://content-lake-app-ui:80;
         location / {
             ${NGINX_ROOT_DIRECTIVE}
         }
     }
+
+    # ── HTTPS server (local self-signed) ────────────────────────────────────────
+    # This block is included verbatim by the entrypoint only when USE_HTTPS=true.
+    ##HTTPS_SERVER_BLOCK_START##
+    server {
+
+        listen 443 ssl;
+        http2 on;
+        server_name ${SERVER_NAME};
+
+        ssl_certificate     /etc/nginx/certs/server.crt;
+        ssl_certificate_key /etc/nginx/certs/server.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+        ssl_prefer_server_ciphers off;
+
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+
+        client_max_body_size 0;
+
+        set  $allowOriginSite *;
+        proxy_pass_request_headers on;
+        proxy_pass_header Set-Cookie;
+
+        proxy_connect_timeout 600;
+        proxy_send_timeout    600;
+        proxy_read_timeout    600;
+        send_timeout          600;
+
+        proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+        proxy_redirect off;
+        proxy_buffering off;
+        proxy_set_header Host            $host;
+        proxy_set_header X-Real-IP       $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass_header Set-Cookie;
+
+        set $batch_ingester_upstream batch-ingester:9090;
+        set $rag_service_upstream    rag-service:9091;
+        set $control_center_upstream control-center:8080;
+        set $alfresco_upstream       alfresco:8080;
+        set $share_upstream          share:8080;
+        set $content_app_upstream    content-app:8080;
+        set $demo_ui_upstream        content-lake-app-ui:80;
+
+        location ~ ^(/.*/service/api/solr/.*)$             { return 403; }
+        location ~ ^(/.*/s/api/solr/.*)$                   { return 403; }
+        location ~ ^(/.*/wcservice/api/solr/.*)$           { return 403; }
+        location ~ ^(/.*/wcs/api/solr/.*)$                 { return 403; }
+        location ~ ^(/.*/proxy/alfresco/api/solr/.*)$      { return 403; }
+        location ~ ^(/.*/-default-/proxy/alfresco/api/.*)$ { return 403; }
+
+        location /api/rag/chat/stream {
+            proxy_pass http://$rag_service_upstream;
+            proxy_next_upstream off;
+            proxy_read_timeout 300s;
+            proxy_cache off;
+        }
+
+        location /api/sync {
+            if ($sync_backend = "") { return 404; }
+            proxy_set_header Authorization $sync_authorization;
+            proxy_pass http://$sync_backend;
+        }
+
+        location /api/content-lake {
+            proxy_pass http://$batch_ingester_upstream;
+        }
+
+        location /api/rag {
+            proxy_pass http://$rag_service_upstream;
+        }
+
+        location /admin {
+            proxy_pass http://$control_center_upstream;
+        }
+
+        location /alfresco/ {
+            proxy_pass http://$alfresco_upstream;
+        }
+
+        location /api-explorer/ {
+            proxy_pass http://$alfresco_upstream;
+        }
+
+        location = /nuxeo {
+            return 301 /nuxeo/;
+        }
+
+        location /nuxeo/ {
+            proxy_pass http://host.docker.internal:8081;
+        }
+
+        location /share/ {
+            proxy_pass http://$share_upstream;
+        }
+
+        location = /aca {
+            return 301 /aca/;
+        }
+
+        location /aca/ {
+            rewrite ^/aca(/.*)$ $1 break;
+            proxy_pass http://$content_app_upstream;
+            sub_filter_once on;
+            sub_filter_types text/html;
+            sub_filter '<base href="/">' '<base href="/aca/">';
+            sub_filter 'href="/' 'href="/aca/';
+            sub_filter 'src="/' 'src="/aca/';
+        }
+
+        location / {
+            ${NGINX_ROOT_DIRECTIVE}
+        }
+    }
+    ##HTTPS_SERVER_BLOCK_END##
 }
