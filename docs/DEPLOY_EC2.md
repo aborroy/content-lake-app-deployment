@@ -488,6 +488,10 @@ Replace `<EC2_PUBLIC_IP_OR_DOMAIN>` with your instance's IP or domain name.
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/admin/` | Alfresco Control Center |
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/api/rag/` | RAG Service |
 
+> To enable HTTPS with a trusted Let's Encrypt certificate, follow
+> [docs/https-ec2.md](https-ec2.md). After that, all URLs above become
+> `https://` and HTTP redirects automatically.
+
 ## 19. Day-to-Day Commands
 
 ```bash
