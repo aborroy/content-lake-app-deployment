@@ -12,8 +12,8 @@ services:
       args:
         ACA_TAG: ${ACA_TAG:-7.3.0}
     environment:
-      APP_CONFIG_ECM_HOST: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}
-      APP_CONFIG_RAG_URL: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}
+      APP_CONFIG_ECM_HOST: ${PUBLIC_BASE_URL:-http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}}
+      APP_CONFIG_RAG_URL: ${PUBLIC_BASE_URL:-http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}}
     networks:
       - stack
 
@@ -28,9 +28,9 @@ services:
         host_ip: "${BIND_IP:-0.0.0.0}"
         protocol: tcp
     environment:
-      ALFRESCO_URL: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}
-      NUXEO_URL: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}/nuxeo
-      RAG_URL: http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}/api/rag
+      ALFRESCO_URL: ${PUBLIC_BASE_URL:-http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}}
+      NUXEO_URL: ${PUBLIC_BASE_URL:-http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}}/nuxeo
+      RAG_URL: ${PUBLIC_BASE_URL:-http://${SERVER_NAME:-localhost}:${PUBLIC_PORT:-80}}/api/rag
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
