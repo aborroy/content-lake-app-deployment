@@ -7,7 +7,19 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://docs.docker.com/compose/)
 [![Status](https://img.shields.io/badge/Status-PoC-yellow.svg)]()
 
-Self-contained deployment for Content Lake App — ingests content from Alfresco and Nuxeo into hxpr for hybrid semantic search and RAG.
+Self-contained deployment for Content Lake App -- ingests content from Alfresco and Nuxeo into hxpr for hybrid semantic search and RAG.
+
+## Content Lake Ecosystem
+
+Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into [hxpr](https://github.com/HylandSoftware/hxpr) for hybrid semantic search and RAG.
+
+| Repo | Role |
+|---|---|
+| [content-lake-app](https://github.com/aborroy/content-lake-app) | Java ingestion pipeline and RAG service |
+| **[content-lake-app-deployment](https://github.com/aborroy/content-lake-app-deployment)** | Docker Compose stack that wires everything together (this repo) |
+| [alfresco-content-lake-ui](https://github.com/aborroy/alfresco-content-lake-ui) | ACA/ADW extension: semantic search + RAG chat sidebar |
+| [content-lake-app-ui](https://github.com/aborroy/content-lake-app-ui) | Standalone demo UI (Alfresco + Nuxeo dual auth) |
+| [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) | Local Nuxeo + PostgreSQL stack (required for Nuxeo profiles) |
 
 ## Quick start
 
@@ -216,29 +228,27 @@ This repo vendors the required ACS module/config pieces locally and builds the r
 - Docker Compose orchestration split across five focused `compose.*.yaml` files
 - A single nginx config template replacing per-mode nginx files
 
-## GitHub Projects Used
+## Source Contexts
 
-- [`aborroy/nuxeo-deployment`](https://github.com/aborroy/nuxeo-deployment)
-  **Optional sibling checkout.** Required only for `nuxeo`, `full`, or `demo` profiles.
-  Provides the separate local Nuxeo stack the ingesters connect to at `http://host.docker.internal:8081/nuxeo`.
+By default, all Java services and UI images are built by pulling source from GitHub via Docker
+BuildKit. No local checkouts are needed except `nuxeo-deployment` (sibling directory, see
+Quick Start).
 
-- [`aborroy/content-lake-app-deployment`](https://github.com/aborroy/content-lake-app-deployment)
-  This repository.
+| Repo | Default source | Local override env var |
+|---|---|---|
+| `content-lake-app` | `github.com/aborroy/content-lake-app#main` | `CONTENT_LAKE_GIT_CONTEXT=../content-lake-app` |
+| `alfresco-content-lake-ui` | `github.com/aborroy/alfresco-content-lake-ui#main` | `CONTENT_LAKE_UI_GIT_CONTEXT=../alfresco-content-lake-ui` |
+| `content-lake-app-ui` | `github.com/aborroy/content-lake-app-ui#main` | `CONTENT_LAKE_APP_UI_CONTEXT=../content-lake-app-ui` |
+| `hxpr` | `github.com/HylandSoftware/hxpr` (branch from `HXPR_GIT_REF`) | `HXPR_LOCAL_IMAGE=<local-tag>` |
+| `nuxeo-deployment` | sibling directory `../nuxeo-deployment` (required for Nuxeo profiles) | -- |
 
-- [`aborroy/content-lake-app`](https://github.com/aborroy/content-lake-app)
-  Remote BuildKit context for: `batch-ingester`, `live-ingester`, `nuxeo-batch-ingester`, `nuxeo-live-ingester`, `rag-service`, and the `content-lake-repo-model` JAR injected into the Alfresco image.
+To build everything from local source (useful during active development):
 
-- [`aborroy/alfresco-content-lake-ui`](https://github.com/aborroy/alfresco-content-lake-ui)
-  Remote BuildKit context for the `content-app` image (ACA with RAG extension). **Not a standalone app** — the extension is built into ACA by its Dockerfile.
+```bash
+make up-demo local
+```
 
-- [`aborroy/content-lake-app-ui`](https://github.com/aborroy/content-lake-app-ui)
-  Remote BuildKit context for the `content-lake-app-ui` demo image (`demo` profile only). **Demo/sandbox only — not for production.** Override with a local path via `CONTENT_LAKE_APP_UI_CONTEXT` if needed.
-
-- [`HylandSoftware/hxpr`](https://github.com/HylandSoftware/hxpr)
-  Cloned during the HXPR image build. Branch/ref controlled by `HXPR_GIT_REF` and `HXPR_GIT_SHA`.
-
-- [`HylandSoftware/hxp-transform-service`](https://github.com/HylandSoftware/hxp-transform-service)
-  Not cloned directly, but consumed as an authenticated Maven dependency from GitHub Packages during the HXPR build.
+The `local` parameter sets all four `*_CONTEXT` overrides automatically.
 
 ## Prerequisites
 
