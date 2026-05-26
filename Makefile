@@ -135,9 +135,15 @@ clean: ## Stop containers and remove ALL volumes [DESTRUCTIVE — wipes all data
 
 define _urls
 	@set -a; . ./.env; if [ -f ./.env.local ]; then . ./.env.local; fi; set +a; \
-	  base="http://$${SERVER_NAME:-localhost}"; \
-	  p="$${PUBLIC_PORT:-80}"; \
-	  [ "$$p" != "80" ] && base="$$base:$$p"; \
+	  if [ "$${USE_HTTPS:-false}" = "true" ]; then \
+	    p="$${HTTPS_PORT:-443}"; \
+	    base="https://$${SERVER_NAME:-localhost}"; \
+	    [ "$$p" != "443" ] && base="$$base:$$p"; \
+	  else \
+	    p="$${PUBLIC_PORT:-80}"; \
+	    base="http://$${SERVER_NAME:-localhost}"; \
+	    [ "$$p" != "80" ] && base="$$base:$$p"; \
+	  fi; \
 	  echo ""; \
 	  echo "Stack starting ($(1)). Endpoints once healthy:"; \
 	  echo "  RAG API  → $$base/api/rag"; \
