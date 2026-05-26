@@ -84,5 +84,5 @@ curl -u admin:admin -X POST 'http://localhost/api/sync/configured?sourceType=nux
 
 ## Deploying to AWS EC2
 
-See [DEPLOY_EC2.md](../content-lake-app-deployment/DEPLOY_EC2.md) for a step-by-step guide to
-running the full stack on a `g5.2xlarge` Ubuntu instance with GPU-accelerated inference.
+See [DEPLOY_EC2.md](DEPLOY_EC2.md) for a step-by-step guide to running the full stack on a
+`g5.2xlarge` Ubuntu instance with GPU-accelerated inference.

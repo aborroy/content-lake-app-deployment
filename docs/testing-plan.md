@@ -20,9 +20,9 @@ Tests are grouped into eight sections and should be executed in order.
 | Batch sync status | `http://localhost/api/sync/status` | `admin:admin` |
 | RAG service | `http://localhost/api/rag` | — (permit-all in dev) |
 
-> **Stack mode:** Use `STACK_MODE=alfresco` for sections A–C and G (Alfresco).
-> Use `STACK_MODE=nuxeo` for sections D–E (Nuxeo-only; also starts HXPR + RAG but not Alfresco services).
-> Use `STACK_MODE=full` for section F cross-source tests (both source types simultaneously).
+> **Stack profile:** Use `make up-alfresco` for sections A–C and G (Alfresco).
+> Use `make up-nuxeo` for sections D–E (Nuxeo-only; also starts HXPR + RAG but not Alfresco services).
+> Use `make up-full` for section F cross-source tests (both source types simultaneously).
 >
 > **Nginx routing:** In each mode the nginx proxy routes `/api/sync/*` to the ingester for
 > that mode only. No `?sourceType=` parameter is needed — just `POST /api/sync/configured`.
@@ -36,20 +36,20 @@ Tests are grouped into eight sections and should be executed in order.
 **Alfresco-only phase** (sections A–C, G, H):
 ```bash
 cd content-lake-app-deployment
-STACK_MODE=alfresco make up
+make up-alfresco
 ```
 
-**Nuxeo-only phase** (sections D–E): start the sibling Nuxeo stack first, then content-lake in nuxeo mode:
+**Nuxeo-only phase** (sections D–E): start the sibling Nuxeo stack first, then content-lake in nuxeo profile:
 ```bash
 cd ../nuxeo-deployment && docker compose up -d
 cd ../content-lake-app-deployment
-STACK_MODE=nuxeo make up
+make up-nuxeo
 ```
 
 **Cross-source phase** (section F): both sources running simultaneously:
 ```bash
 # nuxeo-deployment must already be running
-STACK_MODE=full make up
+make up-full
 ```
 
 Wait until all services are healthy before running tests. The automated test scripts in
@@ -209,7 +209,7 @@ Expected: `201 Created` for each upload.
 ### B3 — Trigger Alfresco full sync
 
 ```bash
-# In STACK_MODE=alfresco nginx routes /api/sync/* to batch-ingester:9090 automatically.
+# In alfresco profile nginx routes /api/sync/* to batch-ingester:9090 automatically.
 # No ?sourceType= parameter required.
 JOB_ID=$(curl -s -u admin:admin -X POST \
   'http://localhost/api/sync/configured' \
@@ -378,7 +378,7 @@ Expected: result with `source_nodeId` = `$TXT_ID` now appears for `user-a`.
 
 ## D. Nuxeo — Batch Ingestion
 
-> Requires `STACK_MODE=full` and the `nuxeo-deployment` stack running at `http://localhost:8081`.
+> Requires `make up-full` and the `nuxeo-deployment` stack running at `http://localhost:8081`.
 
 ### D1 — Create test workspace
 
@@ -424,7 +424,7 @@ Repeat for each test document. Record the `uid` for each.
 ### D3 — Trigger Nuxeo full sync
 
 ```bash
-# In STACK_MODE=nuxeo nginx routes /api/sync/* to nuxeo-batch-ingester:9093 automatically.
+# In nuxeo profile nginx routes /api/sync/* to nuxeo-batch-ingester:9093 automatically.
 # No ?sourceType= parameter required.
 NUX_JOB=$(curl -s -u Administrator:Administrator -X POST \
   'http://localhost/api/sync/configured' | jq -r '.jobId')
@@ -948,8 +948,8 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 ## Execution Order Summary
 
-### Phase 1 — `STACK_MODE=alfresco`
-Start: `STACK_MODE=alfresco make up`
+### Phase 1 — alfresco profile
+Start: `make up-alfresco`
 
 | Order | Section | Prerequisite |
 |---|---|---|
@@ -959,10 +959,10 @@ Start: `STACK_MODE=alfresco make up`
 | 4 | G — Permission Tests | B completed; test users created |
 | 5 | H — Chunking Strategy | B completed |
 
-Stop: `STACK_MODE=alfresco make down`
+Stop: `make down`
 
-### Phase 2 — `STACK_MODE=nuxeo`
-Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `STACK_MODE=nuxeo make up`
+### Phase 2 — nuxeo profile
+Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `make up-nuxeo`
 
 | Order | Section | Prerequisite |
 |---|---|---|
@@ -970,10 +970,10 @@ Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `STACK_MODE=nuxeo
 | 7 | D — Nuxeo Batch | A passes |
 | 8 | E — Nuxeo Live | D completed |
 
-Stop: `STACK_MODE=nuxeo make down` then `(cd ../nuxeo-deployment && docker compose down)`
+Stop: `make down` then `(cd ../nuxeo-deployment && docker compose down)`
 
-### Phase 3 — `STACK_MODE=full` (optional cross-source)
-Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `STACK_MODE=full make up`
+### Phase 3 — full profile (optional cross-source)
+Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `make up-full`
 
 | Order | Section | Prerequisite |
 |---|---|---|
