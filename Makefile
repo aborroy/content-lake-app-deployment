@@ -60,6 +60,10 @@ local: ## Placeholder target for 'local' parameter — use: make up-demo local
 up-alfresco: ## Alfresco source — core services (~17)
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui)..."
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
+	  NGINX_ROOT_DIRECTIVE="return 302 /aca/;" \
+	  docker compose $(ENV_ARGS) --profile alfresco build --no-cache
 endif
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
 	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
@@ -72,6 +76,10 @@ up-nuxeo: ## Nuxeo source — start ../nuxeo-deployment first, then this
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app)..."
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=nuxeo-batch-ingester:9093 \
+	  NGINX_ROOT_DIRECTIVE="return 302 /nuxeo/;" \
+	  docker compose $(ENV_ARGS) --profile nuxeo build --no-cache
 endif
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
 	  NGINX_SYNC_DEFAULT_BACKEND=nuxeo-batch-ingester:9093 \
@@ -84,6 +92,10 @@ up-full: ## Alfresco + Nuxeo — start ../nuxeo-deployment first, then this
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui)..."
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
+	  NGINX_ROOT_DIRECTIVE="return 302 /aca/;" \
+	  docker compose $(ENV_ARGS) --profile full build --no-cache
 endif
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
 	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
@@ -96,6 +108,10 @@ up-demo: ## Full stack + demo UI at / — start ../nuxeo-deployment first, then 
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui, ../content-lake-app-ui)..."
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \
+	  NGINX_ROOT_DIRECTIVE="proxy_pass http://content-lake-app-ui:80;" \
+	  docker compose $(ENV_ARGS) --profile demo build --no-cache
 endif
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
 	  NGINX_SYNC_DEFAULT_BACKEND=batch-ingester:9090 \

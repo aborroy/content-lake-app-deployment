@@ -12,8 +12,13 @@ services:
       args:
         ACA_TAG: ${ACA_TAG:-7.3.0}
     environment:
-      APP_CONFIG_ECM_HOST: ${PUBLIC_BASE_URL:-}
-      APP_CONFIG_RAG_URL: ${PUBLIC_BASE_URL:-}
+      APP_CONFIG_ECM_HOST: ${PUBLIC_BASE_URL:-http://alfresco:8080}
+      APP_CONFIG_RAG_URL: ${PUBLIC_BASE_URL:-http://rag-service:9091}
+    depends_on:
+      alfresco:
+        condition: service_healthy
+      rag-service:
+        condition: service_healthy
     networks:
       - stack
 

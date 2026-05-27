@@ -245,7 +245,7 @@ To build everything from local source (useful during active development):
 make up-demo local
 ```
 
-The `local` parameter sets all four `*_CONTEXT` overrides automatically.
+The `local` parameter sets all four `*_CONTEXT` overrides automatically and forces `--no-cache` so local source changes are always picked up.
 
 ## Prerequisites
 

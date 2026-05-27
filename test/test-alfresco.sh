@@ -16,11 +16,23 @@
 set -uo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-ALF_BASE='http://localhost/alfresco/api/-default-/public/alfresco/versions/1'
-ALF_AUTH='admin:admin'
-SYNC_URL='http://localhost/api/sync'
-RAG_URL='http://localhost/api/rag'
-LIVE_URL='http://localhost:9092/api/live/status'   # direct port — may not be exposed
+HOST="${HOST:-localhost}"
+USE_HTTPS="${USE_HTTPS:-false}"
+ALF_AUTH="${ALF_AUTH:-admin:admin}"
+NUXEO_AUTH="${NUXEO_AUTH:-Administrator:Administrator}"
+
+if [ "${USE_HTTPS}" = "true" ]; then
+  BASE="https://${HOST}"
+  CURL_OPTS="-k"
+else
+  BASE="http://${HOST}"
+  CURL_OPTS=""
+fi
+
+ALF_BASE="${BASE}/alfresco/api/-default-/public/alfresco/versions/1"
+SYNC_URL="${BASE}/api/sync"
+RAG_URL="${BASE}/api/rag"
+LIVE_URL="http://${HOST}:9092/api/live/status"   # direct port — may not be exposed
 
 PASS=0; FAIL=0
 TMPDIR_DATA="$(mktemp -d)"
@@ -43,7 +55,7 @@ trap cleanup EXIT
 create_folder() {
   local parent="$1" name="$2"
   local resp http_code body
-  resp=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+  resp=$(curl -s $CURL_OPTS -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
     "$ALF_BASE/nodes/$parent/children" \
     -H 'Content-Type: application/json' \
     -d "{\"name\":\"$name\",\"nodeType\":\"cm:folder\"}" 2>/dev/null)
@@ -52,7 +64,7 @@ create_folder() {
   if [ "$http_code" = "201" ]; then
     printf '%s' "$body" | jq -r '.entry.id // empty'
   elif [ "$http_code" = "409" ]; then
-    curl -sf -u "$ALF_AUTH" \
+    curl -sf $CURL_OPTS -u "$ALF_AUTH" \
       "$ALF_BASE/nodes/$parent/children?fields=id,name&maxItems=100" 2>/dev/null \
       | jq -r --arg n "$name" \
           '.list.entries[]? | select(.entry.name==$n) | .entry.id' | head -1
@@ -66,7 +78,7 @@ create_folder() {
 upload_file() {
   local parent="$1" path="$2" name="${3:-$(basename "$2")}" mime="${4:-text/plain}"
   local resp http_code body node_id
-  resp=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+  resp=$(curl -s $CURL_OPTS -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
     "$ALF_BASE/nodes/$parent/children" \
     -F "filedata=@${path};type=${mime}" \
     -F "name=$name" 2>/dev/null)
@@ -76,7 +88,7 @@ upload_file() {
     printf '%s' "$body" | jq -r '.entry.id // empty'
   elif [ "$http_code" = "409" ]; then
     # File already exists — look up its nodeId by name
-    curl -sf -u "$ALF_AUTH" \
+    curl -sf $CURL_OPTS -u "$ALF_AUTH" \
       "$ALF_BASE/nodes/$parent/children?fields=id,name&maxItems=100" 2>/dev/null \
       | jq -r --arg n "$name" \
           '.list.entries[]? | select(.entry.name==$n) | .entry.id' | head -1
@@ -90,7 +102,7 @@ upload_file() {
 run_sync_wait() {
   local folder_id="$1"
   local resp job_id status processed
-  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+  resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
     -H 'Content-Type: application/json' \
     -d "{\"folders\":[\"$folder_id\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
     2>/dev/null || echo '{}')
@@ -105,7 +117,7 @@ run_sync_wait() {
   local elapsed=0
   while [ $elapsed -lt 300 ]; do
     local sr
-    sr=$(curl -sf -u "$ALF_AUTH" "$SYNC_URL/status/$job_id" 2>/dev/null || echo '{}')
+    sr=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$job_id" 2>/dev/null || echo '{}')
     status=$(echo "$sr" | jq -r '.status // "UNKNOWN"')
     case "$status" in
       COMPLETED)
@@ -129,7 +141,7 @@ run_sync_wait() {
 rag_find_node() {
   local query="$1" node_id="$2" tid="$3" label="$4"
   local resp found
-  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -146,7 +158,7 @@ rag_find_node() {
 rag_absent_node() {
   local query="$1" node_id="$2" tid="$3" label="$4"
   local resp found
-  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -163,7 +175,7 @@ rag_absent_node() {
 rag_find_node_as() {
   local query="$1" node_id="$2" tid="$3" label="$4" auth="$5"
   local resp found
-  resp=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf $CURL_OPTS -u "$auth" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -180,7 +192,7 @@ rag_find_node_as() {
 rag_absent_node_as() {
   local query="$1" node_id="$2" tid="$3" label="$4" auth="$5"
   local resp found
-  resp=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+  resp=$(curl -sf $CURL_OPTS -u "$auth" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.1}" 2>/dev/null || echo '{}')
   found=$(echo "$resp" | jq --arg id "$node_id" \
@@ -198,7 +210,7 @@ rag_absent_node_as() {
 reconcile_node_permissions() {
   local node_id="$1" recursive="${2:-true}"
   local resp failed
-  resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/permissions" \
+  resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/permissions" \
     -H 'Content-Type: application/json' \
     -d "{\"nodeIds\":[\"$node_id\"],\"recursive\":$recursive}" 2>/dev/null || echo '{}')
   failed=$(echo "$resp" | jq -r '.failed // 1' 2>/dev/null || echo 1)
@@ -208,7 +220,7 @@ reconcile_node_permissions() {
 set_node_permissions() {
   local node_id="$1" perms_json="$2"
   local code
-  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+  code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
     -d "{\"permissions\":$perms_json}" 2>/dev/null || echo 000)
@@ -219,7 +231,7 @@ set_node_permissions() {
 create_alfresco_user() {
   local id="$1" first="$2" last="$3"
   local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X POST \
+  code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X POST \
     "$ALF_BASE/people" \
     -H 'Content-Type: application/json' \
     -d "{\"id\":\"$id\",\"firstName\":\"$first\",\"lastName\":\"$last\",\"email\":\"${id}@test.local\",\"password\":\"password\"}")
@@ -579,7 +591,7 @@ HEADER
 section "A — Smoke Tests"
 
 # A1: Batch ingester status endpoint
-code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_URL/status" 2>/dev/null || echo 000)
+code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_URL/status" 2>/dev/null || echo 000)
 [ "$code" = "200" ] && pass "A1: Batch ingester status endpoint is healthy" \
                      || fail "A1: Batch ingester status returned HTTP $code"
 
@@ -591,7 +603,7 @@ rag_status=$(echo "$rag_health" | jq -r '.status // "UNKNOWN"')
 echo "    $(echo "$rag_health" | jq -c '{embedding:.embedding.status, hxpr:.hxpr.status, llm:.llm.status}')"
 
 # A3: Alfresco repository connectivity
-code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
+code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
   "$ALF_BASE/nodes/-root-/children" 2>/dev/null || echo 000)
 [ "$code" = "200" ] && pass "A3: Alfresco repository responds" \
                      || fail "A3: Alfresco /nodes/-root-/children returned HTTP $code"
@@ -604,7 +616,7 @@ section "B — Alfresco Batch Ingestion"
 create_test_data
 
 # B1: Create test folder under admin home (or reuse if it already exists)
-FOLDER_RESP=$(curl -s -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
+FOLDER_RESP=$(curl -s $CURL_OPTS -w '\n%{http_code}' -u "$ALF_AUTH" -X POST \
   "$ALF_BASE/nodes/-my-/children" \
   -H 'Content-Type: application/json' \
   -d '{"name":"content-lake-test","nodeType":"cm:folder"}')
@@ -616,7 +628,7 @@ if [ "$FOLDER_HTTP" = "201" ]; then
   pass "B1: Test folder created (nodeId=$FOLDER_ID)"
 elif [ "$FOLDER_HTTP" = "409" ]; then
   # Folder already exists — look up its ID
-  FOLDER_ID=$(curl -sf -u "$ALF_AUTH" \
+  FOLDER_ID=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" \
     "$ALF_BASE/nodes/-my-/children?where=(nodeType='cm:folder')&fields=id,name" \
     | jq -r '.list.entries[]? | select(.entry.name=="content-lake-test") | .entry.id' | head -1)
   if [ -n "$FOLDER_ID" ]; then
@@ -664,13 +676,13 @@ rag_find_node "fiscal year total revenue gross profit EBITDA"              "$LON
 # B10: Idempotency — re-run same sync, verify chunk count does not grow
 # Captures count BEFORE second sync, then after; passes if count is unchanged.
 if [ -n "${TXT_ID:-}" ]; then
-  resp_before=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+  resp_before=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
   count_before=$(echo "$resp_before" | jq --arg id "$TXT_ID" \
     '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
   info "Re-running sync for idempotency check (pre-sync count=$count_before) …"
-  resp2=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+  resp2=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
     -H 'Content-Type: application/json' \
     -d "{\"folders\":[\"$FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
     2>/dev/null || echo '{}')
@@ -679,7 +691,7 @@ if [ -n "${TXT_ID:-}" ]; then
     info "Second sync job: $job2 — waiting 60 s for completion and embeddings …"
     sleep 60
   fi
-  resp_after=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+  resp_after=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
     -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
   count_after=$(echo "$resp_after" | jq --arg id "$TXT_ID" \
@@ -731,7 +743,7 @@ Unique sentinel phrase: tangerine-stellar-vortex-88q version two content.
 
 The document has been updated. This tests the update event flow.
 EOF
-  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+  code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_BASE/nodes/$LIVE_NODE_ID/content" \
     -H 'Content-Type: text/plain' \
     --data-binary "@$TMPDIR_DATA/live-test-v2.txt" 2>/dev/null || echo 000)
@@ -747,7 +759,7 @@ fi
 
 # C3: Delete document — should disappear from search
 if [ -n "$LIVE_NODE_ID" ]; then
-  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
+  code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
     "$ALF_BASE/nodes/$LIVE_NODE_ID" 2>/dev/null || echo 000)
   if [ "$code" = "204" ]; then
     pass "C3a: Document deleted (HTTP 204)"
@@ -781,7 +793,7 @@ info "RAG permission filtering applies the authenticated user's identity against
 info "For Alfresco sources, repository admins remain discoverable across Alfresco content even when not listed in locallySet."
 
 # G-N: Unauthenticated RAG requests must be rejected with HTTP 401
-http_code_gn=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
+http_code_gn=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
 if [ "$http_code_gn" = "401" ]; then
@@ -943,7 +955,7 @@ rag_find_node "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
 # then trigger a recursive batch ACL reconciliation.  No content is re-ingested.
 info "G9: Restricting perm-propagation-test folder to user-a only …"
 folder_perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}'
-g9_code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+g9_code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
   "$ALF_BASE/nodes/$PERM_FOLDER_ID" \
   -H 'Content-Type: application/json' \
   -d "{\"permissions\":$folder_perms}" 2>/dev/null || echo 000)
@@ -1011,7 +1023,7 @@ section "H — Chunking Strategy"
 if [ -n "${TXT_ID:-}" ] && [ -n "${LONG_ID:-}" ]; then
 
 # H1: Short document — verify it's retrievable (single-doc in HR topic)
-resp_h1=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+resp_h1=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"home office equipment allowance ergonomic chair five hundred pounds","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
@@ -1027,11 +1039,11 @@ else
 fi
 
 # H2: Long document — early vs late section queries should return different chunk text
-resp_early=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+resp_early=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"fiscal year total revenue gross profit EBITDA executive summary","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
-resp_late=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+resp_late=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"audit certification regulatory compliance framework board approval","topK":5,"minScore":0.2}' \
   2>/dev/null || echo '{}')
@@ -1056,7 +1068,7 @@ else
 fi
 
 # H3: Topic isolation — finance query top-3 should not include HR or tech docs
-resp_fin=$(curl -sf -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+resp_fin=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
   -d '{"query":"capital expenditure shareholder dividends free cash flow","topK":3,"minScore":0.4}' \
   2>/dev/null || echo '{}')
@@ -1096,12 +1108,12 @@ info "          hier-doc-l3.txt ← EXPECTED: absent (ancestor excluded)"
 set_exclude_from_lake() {
   local node_id="$1"
   local current_aspects merged_aspects code
-  current_aspects=$(curl -sf -u "$ALF_AUTH" \
+  current_aspects=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" \
     "$ALF_BASE/nodes/$node_id?fields=aspectNames" 2>/dev/null \
     | jq -c '.entry.aspectNames // []')
   merged_aspects=$(printf '%s' "$current_aspects" \
     | jq -c '. + ["cl:fileScope"] | unique')
-  code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
+  code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
     -d "{\"aspectNames\":$merged_aspects,\"properties\":{\"cl:excludeFromLake\":true}}" \
@@ -1176,7 +1188,7 @@ if [ -n "$LEVEL2_EXCL_ID" ]; then
 fi
 
 # I5+I6: Trigger batch sync from root; NodeDiscoveryService auto-adds cl:indexed to root
-resp=$(curl -sf -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
   -H 'Content-Type: application/json' \
   -d "{\"folders\":[\"$HIER_ROOT_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
   2>/dev/null || echo '{}')
@@ -1188,7 +1200,7 @@ else
   elapsed=0
   hier_status="UNKNOWN"
   while [ $elapsed -lt 300 ]; do
-    sr=$(curl -sf -u "$ALF_AUTH" "$SYNC_URL/status/$hier_job_id" 2>/dev/null || echo '{}')
+    sr=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$hier_job_id" 2>/dev/null || echo '{}')
     hier_status=$(echo "$sr" | jq -r '.status // "UNKNOWN"')
     case "$hier_status" in
       COMPLETED)
@@ -1218,6 +1230,129 @@ rag_absent_node "zephyr-cobalt-lambda-22r level two excluded"           "$DOC_L2
 rag_absent_node "zephyr-cobalt-lambda-33r level three ancestor-excluded" "$DOC_L3_ID" "I8b" "hier-doc-l3.txt (level3 — ancestor excluded)"
 
 fi  # end HIER_ROOT_ID != NONE block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION R — AFTS Regression Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+# Regression tests for two bugs fixed in the AFTS migration:
+#
+#  R1 — Folder alias resolution
+#       /api/sync/batch with folders=["-root-"] must discover documents.
+#       Regression: -root- was passed verbatim to AFTS ANCESTOR: which produced
+#       zero results because AFTS does not resolve Alfresco special aliases.
+#
+#  R2 — AFTS ANCESTOR: direction
+#       Documents inside a cl:indexed folder must be discoverable by the batch
+#       ingester. Regression: hasIndexedAncestor() queried descendants of the
+#       file node (ANCESTOR:"{fileId}"), not its ancestor folders, so every file
+#       appeared out-of-scope and was deleted from hxpr.
+section "R — AFTS Regression Tests"
+
+R_FOLDER_ID=""
+R_NODE_ID=""
+R_SENTINEL="afts-regression-$(date +%Y%m%d-%H%M%S)-$$"
+
+# R-setup: create a dedicated test folder and upload one document
+R_FOLDER_ID=$(create_folder "-my-" "afts-regression-test-$$")
+if [ -n "$R_FOLDER_ID" ]; then
+  pass "R0: Regression test folder created (nodeId=$R_FOLDER_ID)"
+else
+  fail "R0: Failed to create regression test folder -- skipping R1/R2"
+fi
+
+if [ -n "$R_FOLDER_ID" ]; then
+  printf 'AFTS regression document. Sentinel: %s. ' "$R_SENTINEL" > "$TMPDIR_DATA/r-doc.txt"
+  printf 'This document validates AFTS ancestor-scope checks and alias resolution.\n' >> "$TMPDIR_DATA/r-doc.txt"
+  R_NODE_ID=$(upload_file "$R_FOLDER_ID" "$TMPDIR_DATA/r-doc.txt" "r-doc.txt" "text/plain")
+  if [ -n "$R_NODE_ID" ]; then
+    pass "R0b: Regression document uploaded (nodeId=$R_NODE_ID)"
+  else
+    fail "R0b: Failed to upload regression document -- skipping R1/R2"
+  fi
+fi
+
+# R1: Sync triggered with the real folder UUID must succeed and discover the document.
+#     The batch ingester must resolve the folder ID and index its contents.
+#     Wait for Solr to commit the new document before querying via AFTS.
+if [ -n "$R_FOLDER_ID" ] && [ -n "$R_NODE_ID" ]; then
+  info "Waiting 15s for Solr to index the new document before triggering AFTS sync ..."
+  sleep 15
+  r1_resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+    -H 'Content-Type: application/json' \
+    -d "{\"folders\":[\"$R_FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
+    2>/dev/null || echo '{}')
+  r1_job=$(echo "$r1_resp" | jq -r '.jobId // empty')
+  if [ -z "$r1_job" ]; then
+    fail "R1: Sync trigger returned no jobId -- AFTS alias resolution or discovery broken"
+  else
+    pass "R1a: Sync triggered with folder UUID (jobId=$r1_job)"
+    r1_elapsed=0; r1_status="UNKNOWN"
+    while [ $r1_elapsed -lt 120 ]; do
+      r1_sr=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$r1_job" 2>/dev/null || echo '{}')
+      r1_status=$(echo "$r1_sr" | jq -r '.status // "UNKNOWN"')
+      [ "$r1_status" = "COMPLETED" ] || [ "$r1_status" = "FAILED" ] && break
+      sleep 5; r1_elapsed=$((r1_elapsed+5))
+    done
+    r1_discovered=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$r1_job" 2>/dev/null \
+      | jq -r '.discoveredCount // 0')
+    if [ "$r1_status" = "COMPLETED" ] && [ "${r1_discovered:-0}" -gt 0 ]; then
+      pass "R1b: Sync COMPLETED and discovered ${r1_discovered} node(s) -- AFTS alias resolution works"
+    elif [ "$r1_status" = "COMPLETED" ] && [ "${r1_discovered:-0}" -eq 0 ]; then
+      # First sync adds cl:indexed to the folder; Solr needs time to commit before AFTS
+      # can find its descendants. Wait and re-sync once.
+      info "R1b: First sync discovered 0 (cl:indexed just added -- waiting 20s for Solr commit, then re-syncing) ..."
+      sleep 20
+      r2b_resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
+        -H 'Content-Type: application/json' \
+        -d "{\"folders\":[\"$R_FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
+        2>/dev/null || echo '{}')
+      r2b_job=$(echo "$r2b_resp" | jq -r '.jobId // empty')
+      if [ -n "$r2b_job" ]; then
+        r2b_elapsed=0; r2b_disc=0; r2b_status="UNKNOWN"
+        while [ $r2b_elapsed -lt 120 ]; do
+          r2b_sr=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$r2b_job" 2>/dev/null || echo '{}')
+          r2b_status=$(echo "$r2b_sr" | jq -r '.status // "UNKNOWN"')
+          r2b_disc=$(echo "$r2b_sr" | jq -r '.discoveredCount // 0')
+          [ "$r2b_status" = "COMPLETED" ] || [ "$r2b_status" = "FAILED" ] && break
+          sleep 5; r2b_elapsed=$((r2b_elapsed+5))
+        done
+        [ "$r2b_status" = "COMPLETED" ] && [ "${r2b_disc:-0}" -gt 0 ] \
+          && pass "R1b: Re-sync COMPLETED and discovered ${r2b_disc} node(s)" \
+          || fail "R1b: Re-sync status=$r2b_status discovered=${r2b_disc} -- AFTS ANCESTOR query returned nothing"
+      else
+        fail "R1b: Re-sync trigger returned no jobId"
+      fi
+    else
+      fail "R1b: Sync ended with status=$r1_status"
+    fi
+
+    info "Waiting 60s for embeddings ..."
+    sleep 60
+
+    # R2: Document must appear in search -- proves hasIndexedAncestor() returns true
+    #     for a file whose parent has cl:indexed. Regression: it queried descendants
+    #     of the file (always empty for a leaf), so isInScope() always returned false.
+    rag_resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
+      -H 'Content-Type: application/json' \
+      -d "{\"query\":\"$R_SENTINEL AFTS regression ancestor scope\",\"topK\":10,\"minScore\":0.0}" \
+      2>/dev/null || echo '{}')
+    r2_found=$(echo "$rag_resp" | jq --arg id "$R_NODE_ID" \
+      '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+    if [ "${r2_found:-0}" -gt 0 ]; then
+      pass "R2: Document found in search -- AFTS hasIndexedAncestor() correctly checks ancestor direction"
+    else
+      fail "R2: Document NOT found in search -- hasIndexedAncestor() likely still querying descendants instead of ancestors"
+      echo "    nodeId=$R_NODE_ID sentinel=$R_SENTINEL"
+    fi
+  fi
+fi
+
+# R-cleanup
+if [ -n "$R_FOLDER_ID" ]; then
+  curl -sf $CURL_OPTS -u "$ALF_AUTH" -X DELETE "$ALF_BASE/nodes/$R_FOLDER_ID?permanent=true" \
+    2>/dev/null >/dev/null || true
+  pass "R-cleanup: Regression test folder deleted"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Summary
