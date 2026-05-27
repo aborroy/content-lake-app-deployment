@@ -2,6 +2,11 @@
 # Part of the content-lake-app stack; loaded via include: in compose.yaml.
 # Profiles: alfresco, full, demo (Alfresco ingesters + live ingester); nuxeo, full, demo (Nuxeo ingesters + live ingester);
 #           all profiles (rag-service)
+#
+# Build approach: each service uses a local Dockerfile in dockerfiles/<service>/ that pulls
+# app source via additional_context "code" (CONTENT_LAKE_GIT_CONTEXT -- remote Git URL or
+# local ../content-lake-app path). This eliminates duplicate dockerfile_inline blocks while
+# keeping the remote-source build capability.
 
 services:
 
@@ -9,52 +14,12 @@ services:
 
   batch-ingester:
     profiles: [alfresco, full, demo]
+    image: content-lake-app/batch-ingester:local
     build:
-      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
-      dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
-        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-        WORKDIR /workspace
-        COPY pom.xml .
-        COPY common/pom.xml common/pom.xml
-        COPY alfresco/pom.xml alfresco/pom.xml
-        COPY nuxeo/pom.xml nuxeo/pom.xml
-        COPY common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
-        COPY common/content-lake-spi/pom.xml common/content-lake-spi/pom.xml
-        COPY common/content-lake-core/pom.xml common/content-lake-core/pom.xml
-        COPY common/rag-service/pom.xml common/rag-service/pom.xml
-        COPY alfresco/content-lake-source-alfresco/pom.xml alfresco/content-lake-source-alfresco/pom.xml
-        COPY alfresco/alfresco-batch-ingester/pom.xml alfresco/alfresco-batch-ingester/pom.xml
-        COPY alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-ingester/pom.xml
-        COPY nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
-        COPY nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
-        COPY nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl alfresco/alfresco-batch-ingester -am dependency:go-offline
-        COPY common/content-lake-spi/src common/content-lake-spi/src
-        COPY common/content-lake-core/src common/content-lake-core/src
-        COPY alfresco/content-lake-source-alfresco/src alfresco/content-lake-source-alfresco/src
-        COPY alfresco/alfresco-batch-ingester/src alfresco/alfresco-batch-ingester/src
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl alfresco/alfresco-batch-ingester -am package
-        RUN mkdir -p /layers \
-         && JAR="$$(ls -1 alfresco/alfresco-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
-         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
-        FROM eclipse-temurin:21-jre-alpine
-        RUN apk add --no-cache gcompat
-        RUN addgroup -S app && adduser -S -G app app
-        RUN mkdir -p /data && chown app:app /data
-        WORKDIR /app
-        COPY --from=build /layers/dependencies/ ./
-        COPY --from=build /layers/snapshot-dependencies/ ./
-        COPY --from=build /layers/spring-boot-loader/ ./
-        COPY --from=build /layers/application/ ./
-        USER app
-        EXPOSE 9090
-        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-          CMD wget -qO- http://localhost:9090/actuator/health || exit 1
-        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
-        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+      context: .
+      dockerfile: dockerfiles/batch-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
       ACTIVEMQ_URL: ${CONTENT_LAKE_PERMISSION_SYNC_BROKER_URL:-tcp://activemq:61616}
       ACTIVEMQ_USER: ${ACTIVEMQ_USER}
@@ -88,50 +53,12 @@ services:
   # Alfresco live ingester (real-time event-driven sync via ActiveMQ)
   live-ingester:
     profiles: [alfresco, full, demo]
+    image: content-lake-app/live-ingester:local
     build:
-      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
-      dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
-        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-        WORKDIR /workspace
-        COPY pom.xml .
-        COPY common/pom.xml common/pom.xml
-        COPY alfresco/pom.xml alfresco/pom.xml
-        COPY nuxeo/pom.xml nuxeo/pom.xml
-        COPY common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
-        COPY common/content-lake-spi/pom.xml common/content-lake-spi/pom.xml
-        COPY common/content-lake-core/pom.xml common/content-lake-core/pom.xml
-        COPY common/rag-service/pom.xml common/rag-service/pom.xml
-        COPY alfresco/content-lake-source-alfresco/pom.xml alfresco/content-lake-source-alfresco/pom.xml
-        COPY alfresco/alfresco-batch-ingester/pom.xml alfresco/alfresco-batch-ingester/pom.xml
-        COPY alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-ingester/pom.xml
-        COPY nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
-        COPY nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
-        COPY nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl alfresco/alfresco-live-ingester -am dependency:go-offline
-        COPY common/content-lake-spi/src common/content-lake-spi/src
-        COPY common/content-lake-core/src common/content-lake-core/src
-        COPY alfresco/content-lake-source-alfresco/src alfresco/content-lake-source-alfresco/src
-        COPY alfresco/alfresco-live-ingester/src alfresco/alfresco-live-ingester/src
-        RUN mvn -q -DskipTests -pl alfresco/alfresco-live-ingester -am package
-        RUN mkdir -p /layers \
-         && JAR="$$(ls -1 alfresco/alfresco-live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
-         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
-        FROM eclipse-temurin:21-jre-alpine
-        RUN apk add --no-cache gcompat
-        RUN addgroup -S app && adduser -S -G app app
-        WORKDIR /app
-        COPY --from=build /layers/dependencies/ ./
-        COPY --from=build /layers/snapshot-dependencies/ ./
-        COPY --from=build /layers/spring-boot-loader/ ./
-        COPY --from=build /layers/application/ ./
-        USER app
-        EXPOSE 9092
-        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-          CMD wget -qO- http://localhost:9092/actuator/health || exit 1
-        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
-        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+      context: .
+      dockerfile: dockerfiles/live-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
       ACTIVEMQ_URL: tcp://activemq:61616
       ACTIVEMQ_USER: ${ACTIVEMQ_USER}
@@ -165,50 +92,13 @@ services:
 
   rag-service:
     profiles: [alfresco, nuxeo, full, demo]
+    image: content-lake-app/rag-service:local
+    restart: unless-stopped
     build:
-      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
-      dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
-        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-        WORKDIR /workspace
-        COPY pom.xml .
-        COPY common/pom.xml common/pom.xml
-        COPY alfresco/pom.xml alfresco/pom.xml
-        COPY nuxeo/pom.xml nuxeo/pom.xml
-        COPY common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
-        COPY common/content-lake-spi/pom.xml common/content-lake-spi/pom.xml
-        COPY common/content-lake-core/pom.xml common/content-lake-core/pom.xml
-        COPY common/rag-service/pom.xml common/rag-service/pom.xml
-        COPY alfresco/content-lake-source-alfresco/pom.xml alfresco/content-lake-source-alfresco/pom.xml
-        COPY alfresco/alfresco-batch-ingester/pom.xml alfresco/alfresco-batch-ingester/pom.xml
-        COPY alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-ingester/pom.xml
-        COPY nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
-        COPY nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
-        COPY nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl common/rag-service -am dependency:go-offline
-        COPY common/content-lake-spi/src common/content-lake-spi/src
-        COPY common/content-lake-core/src common/content-lake-core/src
-        COPY common/rag-service/src common/rag-service/src
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl common/rag-service -am package
-        RUN mkdir -p /layers \
-         && JAR="$$(ls -1 common/rag-service/target/*.jar | grep -v 'original' | head -n 1)" \
-         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
-        FROM eclipse-temurin:21-jre-alpine
-        RUN apk add --no-cache gcompat
-        RUN addgroup -S app && adduser -S -G app app
-        WORKDIR /app
-        COPY --from=build /layers/dependencies/ ./
-        COPY --from=build /layers/snapshot-dependencies/ ./
-        COPY --from=build /layers/spring-boot-loader/ ./
-        COPY --from=build /layers/application/ ./
-        USER app
-        EXPOSE 9091
-        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-          CMD wget -qO- http://localhost:9091/actuator/health || exit 1
-        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
-        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+      context: .
+      dockerfile: dockerfiles/rag-service/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
       ALFRESCO_URL: http://alfresco:8080
       ALFRESCO_INTERNAL_USERNAME: ${ALFRESCO_ADMIN_USER}
@@ -254,51 +144,12 @@ services:
 
   nuxeo-batch-ingester:
     profiles: [nuxeo, full, demo]
+    image: content-lake-app/nuxeo-batch-ingester:local
     build:
-      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
-      dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
-        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-        WORKDIR /workspace
-        COPY pom.xml .
-        COPY common/pom.xml common/pom.xml
-        COPY alfresco/pom.xml alfresco/pom.xml
-        COPY nuxeo/pom.xml nuxeo/pom.xml
-        COPY common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
-        COPY common/content-lake-spi/pom.xml common/content-lake-spi/pom.xml
-        COPY common/content-lake-core/pom.xml common/content-lake-core/pom.xml
-        COPY common/rag-service/pom.xml common/rag-service/pom.xml
-        COPY alfresco/content-lake-source-alfresco/pom.xml alfresco/content-lake-source-alfresco/pom.xml
-        COPY alfresco/alfresco-batch-ingester/pom.xml alfresco/alfresco-batch-ingester/pom.xml
-        COPY alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-ingester/pom.xml
-        COPY nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
-        COPY nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
-        COPY nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl nuxeo/nuxeo-batch-ingester -am dependency:go-offline
-        COPY common/content-lake-spi/src common/content-lake-spi/src
-        COPY common/content-lake-core/src common/content-lake-core/src
-        COPY nuxeo/content-lake-source-nuxeo/src nuxeo/content-lake-source-nuxeo/src
-        COPY nuxeo/nuxeo-batch-ingester/src nuxeo/nuxeo-batch-ingester/src
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl nuxeo/nuxeo-batch-ingester -am package
-        RUN mkdir -p /layers \
-         && JAR="$$(ls -1 nuxeo/nuxeo-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
-         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
-        FROM eclipse-temurin:21-jre-alpine
-        RUN apk add --no-cache gcompat
-        RUN addgroup -S app && adduser -S -G app app
-        WORKDIR /app
-        COPY --from=build /layers/dependencies/ ./
-        COPY --from=build /layers/snapshot-dependencies/ ./
-        COPY --from=build /layers/spring-boot-loader/ ./
-        COPY --from=build /layers/application/ ./
-        USER app
-        EXPOSE 9093
-        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-          CMD wget -qO- http://localhost:9093/actuator/health || exit 1
-        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
-        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+      context: .
+      dockerfile: dockerfiles/nuxeo-batch-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
       NUXEO_URL: http://host.docker.internal:8081/nuxeo
       NUXEO_USERNAME: ${NUXEO_USERNAME:-Administrator}
@@ -326,52 +177,12 @@ services:
 
   nuxeo-live-ingester:
     profiles: [nuxeo, full, demo]
+    image: content-lake-app/nuxeo-live-ingester:local
     build:
-      context: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
-      dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
-        FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-        WORKDIR /workspace
-        COPY pom.xml .
-        COPY common/pom.xml common/pom.xml
-        COPY alfresco/pom.xml alfresco/pom.xml
-        COPY nuxeo/pom.xml nuxeo/pom.xml
-        COPY common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
-        COPY common/content-lake-spi/pom.xml common/content-lake-spi/pom.xml
-        COPY common/content-lake-core/pom.xml common/content-lake-core/pom.xml
-        COPY common/rag-service/pom.xml common/rag-service/pom.xml
-        COPY alfresco/content-lake-source-alfresco/pom.xml alfresco/content-lake-source-alfresco/pom.xml
-        COPY alfresco/alfresco-batch-ingester/pom.xml alfresco/alfresco-batch-ingester/pom.xml
-        COPY alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-ingester/pom.xml
-        COPY nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
-        COPY nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
-        COPY nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl nuxeo/nuxeo-live-ingester -am dependency:go-offline
-        COPY common/content-lake-spi/src common/content-lake-spi/src
-        COPY common/content-lake-core/src common/content-lake-core/src
-        COPY nuxeo/content-lake-source-nuxeo/src nuxeo/content-lake-source-nuxeo/src
-        COPY nuxeo/nuxeo-live-ingester/src nuxeo/nuxeo-live-ingester/src
-        RUN --mount=type=cache,target=/root/.m2 \
-            mvn -q -DskipTests -pl nuxeo/nuxeo-live-ingester -am package
-        RUN mkdir -p /layers \
-         && JAR="$$(ls -1 nuxeo/nuxeo-live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
-         && java -Djarmode=layertools -jar "$${JAR}" extract --destination /layers
-        FROM eclipse-temurin:21-jre-alpine
-        RUN apk add --no-cache gcompat
-        RUN addgroup -S app && adduser -S -G app app
-        RUN mkdir -p /data && chown app:app /data
-        WORKDIR /app
-        COPY --from=build /layers/dependencies/ ./
-        COPY --from=build /layers/snapshot-dependencies/ ./
-        COPY --from=build /layers/spring-boot-loader/ ./
-        COPY --from=build /layers/application/ ./
-        USER app
-        EXPOSE 9094
-        HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-          CMD wget -qO- http://localhost:9094/actuator/health || exit 1
-        ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
-        ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
+      context: .
+      dockerfile: dockerfiles/nuxeo-live-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
       NUXEO_URL: http://host.docker.internal:8081/nuxeo
       NUXEO_USERNAME: ${NUXEO_USERNAME:-Administrator}

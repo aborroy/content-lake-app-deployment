@@ -21,6 +21,7 @@ services:
   mongodb:
     profiles: [alfresco, nuxeo, full, demo]
     image: mongo:${MONGODB_TAG:-8.2.5}
+    restart: unless-stopped
     hostname: mongo
     volumes:
       - mongodb-data:/data/db
@@ -36,11 +37,14 @@ services:
   opensearch:
     profiles: [alfresco, nuxeo, full, demo]
     image: opensearchproject/opensearch:${OPENSEARCH_TAG:-3.5.0}
+    restart: unless-stopped
     hostname: opensearch
     environment:
       discovery.type: single-node
       cluster.routing.allocation.disk.threshold_enabled: "false"
       plugins.security.disabled: "true"
+      # Required by the OpenSearch demo security installer that runs at startup,
+      # even when security is subsequently disabled via plugins.security.disabled.
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD:-Hyland_Pass1!}
     volumes:
       - opensearch-data:/usr/share/opensearch/data
@@ -67,6 +71,7 @@ services:
   localstack:
     profiles: [alfresco, nuxeo, full, demo]
     image: localstack/localstack:${LOCALSTACK_TAG:-4.13.1}
+    restart: unless-stopped
     environment:
       SERVICES: s3,sts,sqs,sns
       DISABLE_CORS_CHECKS: "1"
@@ -93,6 +98,12 @@ services:
     volumes:
       - ./hxpr/system-integrations-mock/system-integrations-mockoon.json:/data:ro
     command: --data data --port 3002
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/ > /dev/null 2>&1 || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - stack
 
@@ -149,6 +160,7 @@ services:
   hxpr-app:
     profiles: [alfresco, nuxeo, full, demo]
     image: "${HXPR_LOCAL_IMAGE:-content-lake-app/hxpr-app:local}"
+    restart: unless-stopped
     build:
       context: .
       dockerfile: ./hxpr/Dockerfile
@@ -200,7 +212,7 @@ services:
       idp:
         condition: service_started
       mockoon:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q UP || exit 1"]
       interval: 30s

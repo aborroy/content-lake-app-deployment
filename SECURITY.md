@@ -24,3 +24,22 @@ Only the current `main` branch is supported. No backported security patches are 
 - Build secrets (`MAVEN_PASSWORD`, `NEXUS_PASSWORD`, `HXPR_GIT_AUTH_TOKEN`) are passed via
   Docker BuildKit secrets -- they are not baked into the resulting images, but must be protected
   in the local environment.
+
+## Variables That Must Be Overridden Before Non-Local Use
+
+The following variables are committed to `.env` with insecure PoC defaults. Override every one of
+them in `.env.local` (or via the deployment environment) before exposing the stack on any network
+other than localhost:
+
+| Variable | Default | What to change |
+|---|---|---|
+| `ALFRESCO_ADMIN_PASSWORD` | `admin` | Strong password |
+| `POSTGRES_PASSWORD` | `alfresco` | Strong password |
+| `ACTIVEMQ_PASSWORD` | `admin` | Strong password |
+| `SOLR_SECRET` | `3uux2z0blli` | Random string |
+| `OPENSEARCH_ADMIN_PASSWORD` | `Hyland_Pass1!` | Strong password (required if security re-enabled) |
+| `HXPR_IDP_CLIENT_SECRET` | `secret` | Strong secret |
+| `HXPR_IDP_PASSWORD` | `password` | Strong password |
+| `NUXEO_PASSWORD` | `Administrator` | Strong password |
+| `SERVER_NAME` | `localhost` | Public hostname or IP |
+| `USE_HTTPS` | `false` | `true` + valid certificate |
