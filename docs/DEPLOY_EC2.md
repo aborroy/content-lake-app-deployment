@@ -1,4 +1,4 @@
-# Deploying to AWS EC2 — g5.2xlarge
+# Deploying to AWS EC2 -- g5.2xlarge
 
 This guide covers a fresh deployment of the full stack on a **g5.2xlarge** (8 vCPU / 32 GB RAM /
 NVIDIA A10G GPU, 24 GB VRAM) running Ubuntu.
@@ -457,14 +457,14 @@ Notes:
 - The `AI` subgraph runs on the isolated `ai` network (`compose.ai.yaml`); the main stack runs on
   the `stack` network. They are connected only through the host's `12434` port.
 - `compose.ai.yaml` must be fully started (vLLM logs `Application startup complete`) before
-  running `make up`.
+  running `make up-full`.
 
 ## 16. Build and Start the Main Stack
 
 The initial build compiles several Java projects from source; it will take several minutes.
 
 ```bash
-make up
+make up-full
 ```
 
 ## 17. Monitor Startup
@@ -484,7 +484,6 @@ Replace `<EC2_PUBLIC_IP_OR_DOMAIN>` with your instance's IP or domain name.
 |---|---|
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/` | Content Lake UI |
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/alfresco/` | Alfresco Repository |
-| `http://<EC2_PUBLIC_IP_OR_DOMAIN>/share/` | Alfresco Share |
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/admin/` | Alfresco Control Center |
 | `http://<EC2_PUBLIC_IP_OR_DOMAIN>/api/rag/` | RAG Service |
 
@@ -496,7 +495,7 @@ Replace `<EC2_PUBLIC_IP_OR_DOMAIN>` with your instance's IP or domain name.
 
 ```bash
 # Main stack
-make up       # start (skips rebuild after first run)
+make up-full  # start (skips rebuild after first run)
 make down     # stop and remove containers (preserves volumes)
 make logs     # tail all logs
 make ps       # show service status

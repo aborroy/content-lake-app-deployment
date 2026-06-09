@@ -1,4 +1,4 @@
-# Deployment — Alfresco Stack
+# Deployment -- Alfresco Stack
 
 > For first-run instructions, prerequisites, credentials, and Makefile commands see the
 > [main README](../README.md). This page covers Alfresco-specific configuration only.

@@ -1,4 +1,4 @@
-# Deployment — Nuxeo Stack
+# Deployment -- Nuxeo Stack
 
 This guide covers Nuxeo-specific setup for Content Lake. For the full stack deployment see
 [deployment-alfresco.md](deployment-alfresco.md).
@@ -8,7 +8,7 @@ This guide covers Nuxeo-specific setup for Content Lake. For the full stack depl
 ## Local Development Stack
 
 Use the `nuxeo-deployment/` sibling project for local Nuxeo development. No Connect account, CLID,
-or special credentials required — it uses the public `nuxeo` Docker Hub image.
+or special credentials required -- it uses the public `nuxeo` Docker Hub image.
 
 ```bash
 cd ../nuxeo-deployment
@@ -75,7 +75,7 @@ WHERE ecm:path STARTSWITH '/default-domain/workspaces'
 | Hierarchy | Folder-based path tree | Domains, workspaces, folders, files, proxies, versions |
 | Events | ActiveMQ with Event2 model | Internal event bus, audit log, stream processing |
 | Text extraction | Transform Core AIO | `ConversionService` via REST `@convert` |
-| Permissions | ACLs with roles (Consumer, Contributor…) | ACP/ACL/ACE with inherited grants |
+| Permissions | ACLs with roles (Consumer, Contributor...) | ACP/ACL/ACE with inherited grants |
 | Discovery | `@children` REST or NXQL | NXQL preferred for scalability |
 | Authentication | Ticket auth, Basic Auth | Basic auth for MVP; Token/OAuth2 for production |
 
@@ -87,10 +87,10 @@ WHERE ecm:path STARTSWITH '/default-domain/workspaces'
 |---|---|
 | `nodeId` | document `uid` |
 | `sourceType` | `"nuxeo"` |
-| `sourceId` | configured instance ID (NOT `repository` — always `"default"` in main repo) |
+| `sourceId` | configured instance ID (NOT `repository` -- always `"default"` in main repo) |
 | `path` | document path |
 | `mimeType` | MIME type of primary blob (`file:content` xpath or configured blob xpath) |
-| `readPrincipals` | derived from effective ACL — request with `enrichers-document: acls` header |
+| `readPrincipals` | derived from effective ACL -- request with `enrichers-document: acls` header |
 
 ---
 

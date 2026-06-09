@@ -1,4 +1,4 @@
-# Content Lake — End-to-End Testing Plan
+# Content Lake -- End-to-End Testing Plan
 
 This document defines the full test suite for validating a Content Lake deployment against
 Alfresco and Nuxeo. Each test case specifies: the action (curl command), the expected HTTP
@@ -14,18 +14,18 @@ Tests are grouped into eight sections and should be executed in order.
 |---|---|---|
 | Alfresco REST API | `http://localhost/alfresco/api/-default-/public/alfresco/versions/1` | `admin:admin` |
 | Alfresco batch-ingester | `http://localhost/api/sync/configured` | `admin:admin` |
-| Alfresco live status | `http://localhost:9092/api/live/status` | — (port not published by default) |
+| Alfresco live status | `http://localhost:9092/api/live/status` | -- (port not published by default) |
 | Nuxeo REST API | `http://localhost:8081/nuxeo/api/v1` | `Administrator:Administrator` |
 | Nuxeo batch-ingester | `http://localhost/api/sync/configured` | `admin:admin` |
 | Batch sync status | `http://localhost/api/sync/status` | `admin:admin` |
-| RAG service | `http://localhost/api/rag` | — (permit-all in dev) |
+| RAG service | `http://localhost/api/rag` | -- (permit-all in dev) |
 
-> **Stack profile:** Use `make up-alfresco` for sections A–C and G (Alfresco).
-> Use `make up-nuxeo` for sections D–E (Nuxeo-only; also starts HXPR + RAG but not Alfresco services).
+> **Stack profile:** Use `make up-alfresco` for sections A-C and G (Alfresco).
+> Use `make up-nuxeo` for sections D-E (Nuxeo-only; also starts HXPR + RAG but not Alfresco services).
 > Use `make up-full` for section F cross-source tests (both source types simultaneously).
 >
 > **Nginx routing:** In each mode the nginx proxy routes `/api/sync/*` to the ingester for
-> that mode only. No `?sourceType=` parameter is needed — just `POST /api/sync/configured`.
+> that mode only. No `?sourceType=` parameter is needed -- just `POST /api/sync/configured`.
 
 ---
 
@@ -33,13 +33,13 @@ Tests are grouped into eight sections and should be executed in order.
 
 ### 0.1 Start the stack
 
-**Alfresco-only phase** (sections A–C, G, H):
+**Alfresco-only phase** (sections A-C, G, H):
 ```bash
 cd content-lake-app-deployment
 make up-alfresco
 ```
 
-**Nuxeo-only phase** (sections D–E): start the sibling Nuxeo stack first, then content-lake in nuxeo profile:
+**Nuxeo-only phase** (sections D-E): start the sibling Nuxeo stack first, then content-lake in nuxeo profile:
 ```bash
 cd ../nuxeo-deployment && docker compose up -d
 cd ../content-lake-app-deployment
@@ -57,7 +57,7 @@ Wait until all services are healthy before running tests. The automated test scr
 
 ### 0.2 Create test users
 
-**Alfresco** — via Share admin console at `http://localhost/share` or REST:
+**Alfresco** -- via the Control Center admin console at `http://localhost/admin` or REST:
 
 ```bash
 # Create user-a
@@ -73,7 +73,7 @@ curl -s -u admin:admin -X POST \
   -d '{"id":"user-b","firstName":"User","lastName":"B","email":"user-b@test.local","password":"password"}'
 ```
 
-**Nuxeo** — via web UI at `http://localhost:8081/nuxeo` (Admin > Users & Groups) or REST:
+**Nuxeo** -- via web UI at `http://localhost:8081/nuxeo` (Admin > Users & Groups) or REST:
 
 ```bash
 curl -s -u Administrator:Administrator -X POST \
@@ -126,24 +126,24 @@ placeholder files with clearly distinct content per topic.
 
 Run these checks before any ingestion. All should pass within 60 seconds of stack startup.
 
-### A1 — Batch ingester health (Alfresco)
+### A1 -- Batch ingester health (Alfresco)
 
 ```bash
 curl -s -u admin:admin http://localhost/api/sync/status | jq .
 ```
 
-Expected: `200 OK` — JSON object with a `jobs` array (may be empty) and queue metrics.
+Expected: `200 OK` -- JSON object with a `jobs` array (may be empty) and queue metrics.
 
-### A2 — RAG service health
+### A2 -- RAG service health
 
 ```bash
 curl -s http://localhost/api/rag/health | jq .
 curl -s http://localhost/api/rag/search/semantic/health | jq .
 ```
 
-Expected: `200 OK` — both responses show all subsystems as `UP` (embedding, hxpr, llm).
+Expected: `200 OK` -- both responses show all subsystems as `UP` (embedding, hxpr, llm).
 
-### A3 — Alfresco repository connectivity
+### A3 -- Alfresco repository connectivity
 
 ```bash
 curl -s -u admin:admin \
@@ -151,9 +151,9 @@ curl -s -u admin:admin \
   | jq '.list.pagination'
 ```
 
-Expected: `200 OK` — pagination object with `totalItems > 0`.
+Expected: `200 OK` -- pagination object with `totalItems > 0`.
 
-### A4 — Nuxeo connectivity *(full stack only)*
+### A4 -- Nuxeo connectivity *(full stack only)*
 
 ```bash
 curl -s -u Administrator:Administrator \
@@ -161,13 +161,13 @@ curl -s -u Administrator:Administrator \
   -H 'Accept: application/json' | jq '.type'
 ```
 
-Expected: `200 OK` — `"Domain"`.
+Expected: `200 OK` -- `"Domain"`.
 
 ---
 
-## B. Alfresco — Batch Ingestion
+## B. Alfresco -- Batch Ingestion
 
-### B1 — Create test folder
+### B1 -- Create test folder
 
 ```bash
 FOLDER_ID=$(curl -s -u admin:admin -X POST \
@@ -178,9 +178,9 @@ FOLDER_ID=$(curl -s -u admin:admin -X POST \
 echo "Test folder: $FOLDER_ID"
 ```
 
-Expected: `201 Created` — `$FOLDER_ID` is a UUID.
+Expected: `201 Created` -- `$FOLDER_ID` is a UUID.
 
-### B2 — Upload test documents
+### B2 -- Upload test documents
 
 Repeat for each document in the test corpus. Example for `short-memo.txt`:
 
@@ -202,11 +202,11 @@ PDF_ID=$(curl -s -u admin:admin -X POST \
 echo "long-report.pdf node: $PDF_ID"
 ```
 
-Record the `nodeId` for each document — used in verification steps below.
+Record the `nodeId` for each document -- used in verification steps below.
 
 Expected: `201 Created` for each upload.
 
-### B3 — Trigger Alfresco full sync
+### B3 -- Trigger Alfresco full sync
 
 ```bash
 # In alfresco profile nginx routes /api/sync/* to batch-ingester:9090 automatically.
@@ -217,9 +217,9 @@ JOB_ID=$(curl -s -u admin:admin -X POST \
 echo "Sync job: $JOB_ID"
 ```
 
-Expected: `202 Accepted` — response contains `jobId`.
+Expected: `202 Accepted` -- response contains `jobId`.
 
-### B4 — Poll sync status until complete
+### B4 -- Poll sync status until complete
 
 ```bash
 # Poll every 10 seconds; stop when status is COMPLETED or FAILED
@@ -229,7 +229,7 @@ watch -n 10 "curl -s -u admin:admin http://localhost/api/sync/status/$JOB_ID | j
 Expected: `status` transitions from `RUNNING` to `COMPLETED`;
 `discoveredCount` and `processedCount` are both > 0.
 
-### B5 — Verify documents appear in semantic search
+### B5 -- Verify documents appear in semantic search
 
 ```bash
 # HR document
@@ -251,7 +251,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: `source_nodeId` matches `$PDF_ID`; `cin_ingestProperties.source_type` = `"alfresco"`.
 
-### B6 — Idempotency: re-run sync, verify no duplicate documents
+### B6 -- Idempotency: re-run sync, verify no duplicate documents
 
 ```bash
 # Trigger a second sync
@@ -269,12 +269,12 @@ Expected: result count is the same as after the first sync; no duplicates.
 
 ---
 
-## C. Alfresco — Live Ingestion
+## C. Alfresco -- Live Ingestion
 
-Allow ~5–15 seconds between each action and the verification search for ActiveMQ event
+Allow ~5-15 seconds between each action and the verification search for ActiveMQ event
 propagation and embedding to complete.
 
-### C1 — Create document event
+### C1 -- Create document event
 
 ```bash
 NEW_ID=$(curl -s -u admin:admin -X POST \
@@ -296,7 +296,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: at least one result with `source_nodeId` = `$NEW_ID`.
 
-### C2 — Update document event
+### C2 -- Update document event
 
 ```bash
 # Upload new version of the file (replace content)
@@ -316,7 +316,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: updated content is discoverable; old-content-only phrase returns reduced or zero score.
 
-### C3 — Delete document event
+### C3 -- Delete document event
 
 ```bash
 curl -s -u admin:admin -X DELETE \
@@ -330,18 +330,18 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
   | jq '[.results[] | select(.cin_ingestProperties.source_nodeId == "'$NEW_ID'")]'
 ```
 
-Expected: the array is empty — deleted document no longer appears in any results.
+Expected: the array is empty -- deleted document no longer appears in any results.
 
-### C4 — Live ingester metrics
+### C4 -- Live ingester metrics
 
 ```bash
 curl -s http://localhost:9092/api/live/status | jq .
 ```
 
 Expected: `received`, `processed`, `filtered`, and `errors` counters are non-zero and
-reflect the events triggered in C1–C3.
+reflect the events triggered in C1-C3.
 
-### C5 — Permission change propagation
+### C5 -- Permission change propagation
 
 Grant `user-a` read access to a previously restricted document and verify the change
 propagates to the search index (see also Section G for the full permission test suite).
@@ -359,13 +359,13 @@ curl -s -u admin:admin -X PUT \
   }'
 
 # Reconcile the ACL explicitly because Alfresco does not emit permission update events
-curl -s -u admin:admin -X POST http://localhost:9090/api/sync/permissions \
+curl -s -u admin:admin -X POST http://localhost/api/sync/permissions \
   -H 'Content-Type: application/json' \
   -d "{\"nodeIds\":[\"$TXT_ID\"],\"recursive\":true}" | jq .
 
 sleep 5
 
-# Search as user-a — should now find the document
+# Search as user-a -- should now find the document
 curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
   -H 'Content-Type: application/json' \
   -d '{"query":"remote work eligibility policy","topK":5,"minScore":0.3}' \
@@ -376,11 +376,11 @@ Expected: result with `source_nodeId` = `$TXT_ID` now appears for `user-a`.
 
 ---
 
-## D. Nuxeo — Batch Ingestion
+## D. Nuxeo -- Batch Ingestion
 
 > Requires `make up-full` and the `nuxeo-deployment` stack running at `http://localhost:8081`.
 
-### D1 — Create test workspace
+### D1 -- Create test workspace
 
 ```bash
 curl -s -u Administrator:Administrator -X POST \
@@ -390,9 +390,9 @@ curl -s -u Administrator:Administrator -X POST \
   | jq '.uid'
 ```
 
-Expected: `201 Created` — returns document `uid`.
+Expected: `201 Created` -- returns document `uid`.
 
-### D2 — Upload test documents
+### D2 -- Upload test documents
 
 Nuxeo uses a two-step upload (batch upload API) for binary content.
 
@@ -421,7 +421,7 @@ echo "Nuxeo short-memo uid: $NUX_TXT_ID"
 
 Repeat for each test document. Record the `uid` for each.
 
-### D3 — Trigger Nuxeo full sync
+### D3 -- Trigger Nuxeo full sync
 
 ```bash
 # In nuxeo profile nginx routes /api/sync/* to nuxeo-batch-ingester:9093 automatically.
@@ -433,7 +433,7 @@ echo "Nuxeo sync job: $NUX_JOB"
 
 Expected: `202 Accepted`.
 
-### D4 — Poll sync status
+### D4 -- Poll sync status
 
 ```bash
 watch -n 10 "curl -s -u admin:admin http://localhost/api/sync/status/$NUX_JOB \
@@ -442,7 +442,7 @@ watch -n 10 "curl -s -u admin:admin http://localhost/api/sync/status/$NUX_JOB \
 
 Expected: `COMPLETED` with `processedCount > 0`.
 
-### D5 — Verify Nuxeo documents in semantic search
+### D5 -- Verify Nuxeo documents in semantic search
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -453,18 +453,18 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: result with `source_nodeId` = `$NUX_TXT_ID` and `source_type` = `"nuxeo"`.
 
-### D6 — Idempotency re-run
+### D6 -- Idempotency re-run
 
 Same procedure as B6, scoped to Nuxeo documents. Expected: no duplicate results after second sync.
 
 ---
 
-## E. Nuxeo — Live Ingestion
+## E. Nuxeo -- Live Ingestion
 
-Nuxeo live sync uses audit log polling (default ~10–15 s interval). Allow 20–30 s for changes
+Nuxeo live sync uses audit log polling (default ~10-15 s interval). Allow 20-30 s for changes
 to appear.
 
-### E1 — Create document (audit poll)
+### E1 -- Create document (audit poll)
 
 ```bash
 # Upload a new document directly (reuse batch upload pattern from D2)
@@ -480,7 +480,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: document appears in results.
 
-### E2 — Update document
+### E2 -- Update document
 
 ```bash
 # Update document content via Nuxeo REST
@@ -500,7 +500,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: updated content is searchable.
 
-### E3 — Delete document
+### E3 -- Delete document
 
 ```bash
 curl -s -u Administrator:Administrator -X DELETE \
@@ -514,7 +514,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
   | jq '[.results[] | select(.cin_ingestProperties.source_nodeId == "'$NUX_NEW_ID'")]'
 ```
 
-Expected: empty array — document removed from index.
+Expected: empty array -- document removed from index.
 
 ---
 
@@ -522,7 +522,7 @@ Expected: empty array — document removed from index.
 
 These tests assume the full corpus (Section B + D) is already indexed.
 
-### F1 — Semantic search: basic relevance
+### F1 -- Semantic search: basic relevance
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -533,7 +533,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: top results are from `long-report.pdf` and/or `spreadsheet.xlsx`; no HR or tech docs in top 3.
 
-### F2 — Semantic search: minScore filter
+### F2 -- Semantic search: minScore filter
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -544,7 +544,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: fewer results than F1; all returned results have `score >= 0.8`; unrelated documents absent.
 
-### F3 — Hybrid search
+### F3 -- Hybrid search
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/hybrid \
@@ -556,7 +556,7 @@ curl -s -X POST http://localhost/api/rag/search/hybrid \
 Expected: `medium-policy.docx` ranks in the top 3; response includes fusion scores combining
 vector and BM25 contributions.
 
-### F4 — RAG prompt (retrieval + LLM generation)
+### F4 -- RAG prompt (retrieval + LLM generation)
 
 ```bash
 curl -s -X POST http://localhost/api/rag/prompt \
@@ -565,10 +565,10 @@ curl -s -X POST http://localhost/api/rag/prompt \
   | jq '{answer: .answer, sourceCount: (.sources | length)}'
 ```
 
-Expected: `200 OK` — `answer` is a non-empty string with LLM-generated text;
+Expected: `200 OK` -- `answer` is a non-empty string with LLM-generated text;
 `sources` references chunks from `long-report.pdf`.
 
-### F5 — Streaming chat (SSE)
+### F5 -- Streaming chat (SSE)
 
 ```bash
 curl -s -N -X POST http://localhost/api/rag/chat/stream \
@@ -580,7 +580,7 @@ curl -s -N -X POST http://localhost/api/rag/chat/stream \
 Expected: sequence of `data: {"token":"..."}` events ending with a `data: [DONE]` event;
 reconstructed answer references content from `presentation.pptx`.
 
-### F6 — Cross-source search *(full stack only)*
+### F6 -- Cross-source search *(full stack only)*
 
 ```bash
 # Upload identical-topic documents to both Alfresco and Nuxeo (e.g. two versions of the HR memo)
@@ -604,10 +604,10 @@ For Alfresco sources, repository administrators remain discoverability-equivalen
 repository admins even when they are not explicitly present in `locallySet`. The examples
 below therefore grant only the intended end-user or group ACEs.
 
-### G1 — Setup: upload permission-scoped documents
+### G1 -- Setup: upload permission-scoped documents
 
 ```bash
-# confidential-hr.txt — only user-a (Alfresco admins still see it)
+# confidential-hr.txt -- only user-a (Alfresco admins still see it)
 HR_PRIV_ID=$(curl -s -u admin:admin -X POST \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
   -F "filedata=@short-memo.txt;type=text/plain" \
@@ -619,7 +619,7 @@ curl -s -u admin:admin -X PUT \
   -d '{"isInheritanceEnabled":false,"locallySet":[
         {"authorityId":"user-a","name":"Consumer","accessStatus":"ALLOWED"}]}'
 
-# tech-spec-internal.pdf — only user-b (Alfresco admins still see it)
+# tech-spec-internal.pdf -- only user-b (Alfresco admins still see it)
 TECH_PRIV_ID=$(curl -s -u admin:admin -X POST \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
   -F "filedata=@technical-spec.pdf;type=application/pdf" \
@@ -631,7 +631,7 @@ curl -s -u admin:admin -X PUT \
   -d '{"isInheritanceEnabled":false,"locallySet":[
         {"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}'
 
-# roadmap.pptx — GROUP_EVERYONE (public)
+# roadmap.pptx -- GROUP_EVERYONE (public)
 PUBLIC_ID=$(curl -s -u admin:admin -X POST \
   "http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/$FOLDER_ID/children" \
   -F "filedata=@presentation.pptx;type=application/vnd.openxmlformats-officedocument.presentationml.presentation" \
@@ -647,7 +647,7 @@ curl -s -u admin:admin -X PUT \
 Call `/api/sync/permissions` for each changed node, or use a client flow that does it for you,
 then verify all three are indexed as admin (G2 below).
 
-### G2 — Admin sees all documents
+### G2 -- Admin sees all documents
 
 ```bash
 for QUERY in "remote work eligibility" "REST API endpoint" "product roadmap themes"; do
@@ -664,7 +664,7 @@ Expected: each query returns at least one result; all three document node IDs (`
 repository admins remain able to discover Alfresco documents even when the stored ACL only names
 the end user or `GROUP_EVERYONE`.
 
-### G3 — user-a sees own documents + public
+### G3 -- user-a sees own documents + public
 
 ```bash
 # Should find: confidential-hr.txt (own) and roadmap.pptx (public)
@@ -689,7 +689,7 @@ curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
 # Expected: does NOT contain $TECH_PRIV_ID
 ```
 
-### G4 — user-b sees own documents + public
+### G4 -- user-b sees own documents + public
 
 ```bash
 # Should find: tech-spec-internal.pdf (own) and roadmap.pptx (public)
@@ -708,7 +708,7 @@ curl -s -u user-b:password -X POST http://localhost/api/rag/search/semantic \
 # Expected: does NOT contain $HR_PRIV_ID
 ```
 
-### G5 — Permission revocation propagates
+### G5 -- Permission revocation propagates
 
 ```bash
 # Remove user-a's access to confidential-hr.txt
@@ -729,7 +729,7 @@ curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
 Expected: `$HR_PRIV_ID` is absent from user-a's results after revocation. An Alfresco admin can
 still discover it because admin visibility is source-level rather than encoded as a synthetic ACE.
 
-### G6 — Folder ACL propagation to descendants
+### G6 -- Folder ACL propagation to descendants
 
 Validates that a folder-level permission change is propagated to all descendant files in hxpr
 without re-ingesting content (issues #27 and #31).
@@ -738,10 +738,10 @@ Two child files cover the two propagation branches:
 
 | File | `isInheritanceEnabled` | `locallySet` | Expected after folder restricted to user-a |
 |---|---|---|---|
-| `folder-child-inherit.txt` | `true` (default) | — | Inherits folder ACL → user-a only |
+| `folder-child-inherit.txt` | `true` (default) | -- | Inherits folder ACL → user-a only |
 | `folder-child-isolated.txt` | `false` | `user-b` | Keeps own ACL → user-b only |
 
-#### G6.1 — Setup: create folder and upload children
+#### G6.1 -- Setup: create folder and upload children
 
 ```bash
 PERM_FOLDER_ID=$(curl -s -u admin:admin -X POST \
@@ -769,7 +769,7 @@ curl -s -u admin:admin -X PUT \
         {"authorityId":"user-b","name":"Consumer","accessStatus":"ALLOWED"}]}}'
 ```
 
-#### G6.2 — Ingest the subtree
+#### G6.2 -- Ingest the subtree
 
 ```bash
 curl -s -u admin:admin -X POST http://localhost/api/sync/batch \
@@ -778,7 +778,7 @@ curl -s -u admin:admin -X POST http://localhost/api/sync/batch \
 # Wait for COMPLETED, then verify both files are visible as admin.
 ```
 
-#### G6.3 — Change folder permissions and reconcile
+#### G6.3 -- Change folder permissions and reconcile
 
 Disable inheritance on the folder and restrict to user-a only, then trigger a recursive ACL
 reconciliation (no content re-ingestion):
@@ -795,7 +795,7 @@ curl -s -u admin:admin -X POST http://localhost/api/sync/permissions \
   -d "{\"nodeIds\":[\"$PERM_FOLDER_ID\"],\"recursive\":true}"
 ```
 
-#### G6.4 — Verify propagation results
+#### G6.4 -- Verify propagation results
 
 Expected after reconciliation:
 
@@ -831,9 +831,9 @@ curl -s -u user-a:password -X POST http://localhost/api/rag/search/semantic \
 # Admin finds both files (source-level bypass, unaffected by any ACL)
 ```
 
-### G7 — Nuxeo permissions *(full stack only)*
+### G7 -- Nuxeo permissions *(full stack only)*
 
-Repeat the G1–G5 pattern using Nuxeo ACP APIs:
+Repeat the G1-G5 pattern using Nuxeo ACP APIs:
 
 ```bash
 # Set ACL on a Nuxeo document to user-a only
@@ -843,7 +843,7 @@ curl -s -u Administrator:Administrator -X POST \
   -d '{"params":{"user":"user-a","permission":"Read","grant":true,"blockInheritance":true}}'
 ```
 
-Expected behaviour: same as Alfresco permission tests — Nuxeo ACP is mapped to `sys_acl`
+Expected behaviour: same as Alfresco permission tests -- Nuxeo ACP is mapped to `sys_acl`
 in hxpr and enforced at search time.
 
 ---
@@ -853,7 +853,7 @@ in hxpr and enforced at search time.
 These tests inspect the `sysembed_embeddings[].location` field in search results to verify
 that the chunking pipeline produces accurate, well-bounded chunks across all supported formats.
 
-### H1 — Short document: single chunk
+### H1 -- Short document: single chunk
 
 ```bash
 # short-memo.txt (~400 words) should produce exactly one embedding chunk
@@ -863,12 +863,12 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
   | jq "[.results[] | select(.cin_ingestProperties.source_nodeId == \"$TXT_ID\") | .sysembed_embeddings | length]"
 ```
 
-Expected: `[1]` — a single embedding chunk covers the entire document.
+Expected: `[1]` -- a single embedding chunk covers the entire document.
 
-### H2 — Long PDF: page-specific chunk retrieval
+### H2 -- Long PDF: page-specific chunk retrieval
 
 ```bash
-# long-report.pdf (~60 pages) — query phrases from different page ranges
+# long-report.pdf (~60 pages) -- query phrases from different page ranges
 # Page 1: executive summary
 curl -s -X POST http://localhost/api/rag/search/semantic \
   -H 'Content-Type: application/json' \
@@ -881,7 +881,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
   -H 'Content-Type: application/json' \
   -d '{"query":"<phrase from page 30 of long-report.pdf>","topK":3,"minScore":0.4}' \
   | jq '[.results[0].sysembed_embeddings[0].location]'
-# Expected: location.page ≈ 28–32
+# Expected: location.page ≈ 28-32
 
 # Page ~58: appendix
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -891,7 +891,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 # Expected: location.page ≥ 55
 ```
 
-### H3 — Multi-sheet spreadsheet
+### H3 -- Multi-sheet spreadsheet
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -902,7 +902,7 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 Expected: `location.spreadsheet` field present and identifies the correct sheet; `location.page` absent or null.
 
-### H4 — Presentation slide-level chunks
+### H4 -- Presentation slide-level chunks
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -911,9 +911,9 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
   | jq '[.results[0].sysembed_embeddings[0].location]'
 ```
 
-Expected: `location.page` (slide number) ≈ 14–16.
+Expected: `location.page` (slide number) ≈ 14-16.
 
-### H5 — Code-heavy PDF: no mid-sentence splits
+### H5 -- Code-heavy PDF: no mid-sentence splits
 
 ```bash
 curl -s -X POST http://localhost/api/rag/search/semantic \
@@ -926,7 +926,7 @@ Expected: the returned `text` field starts and ends on complete sentences (not m
 mid-code-block splits). Check that the chunk does not begin with a lowercase letter that
 implies a truncated sentence start.
 
-### H6 — Topic isolation
+### H6 -- Topic isolation
 
 ```bash
 # Finance query → no HR or tech docs in top 3
@@ -948,36 +948,36 @@ curl -s -X POST http://localhost/api/rag/search/semantic \
 
 ## Execution Order Summary
 
-### Phase 1 — alfresco profile
+### Phase 1 -- alfresco profile
 Start: `make up-alfresco`
 
 | Order | Section | Prerequisite |
 |---|---|---|
-| 1 | A — Smoke Tests | Stack healthy |
-| 2 | B — Alfresco Batch | A passes |
-| 3 | C — Alfresco Live | B completed |
-| 4 | G — Permission Tests | B completed; test users created |
-| 5 | H — Chunking Strategy | B completed |
+| 1 | A -- Smoke Tests | Stack healthy |
+| 2 | B -- Alfresco Batch | A passes |
+| 3 | C -- Alfresco Live | B completed |
+| 4 | G -- Permission Tests | B completed; test users created |
+| 5 | H -- Chunking Strategy | B completed |
 
 Stop: `make down`
 
-### Phase 2 — nuxeo profile
+### Phase 2 -- nuxeo profile
 Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `make up-nuxeo`
 
 | Order | Section | Prerequisite |
 |---|---|---|
-| 6 | A — Smoke Tests (repeat) | Stack healthy |
-| 7 | D — Nuxeo Batch | A passes |
-| 8 | E — Nuxeo Live | D completed |
+| 6 | A -- Smoke Tests (repeat) | Stack healthy |
+| 7 | D -- Nuxeo Batch | A passes |
+| 8 | E -- Nuxeo Live | D completed |
 
 Stop: `make down` then `(cd ../nuxeo-deployment && docker compose down)`
 
-### Phase 3 — full profile (optional cross-source)
+### Phase 3 -- full profile (optional cross-source)
 Start: `(cd ../nuxeo-deployment && docker compose up -d)` then `make up-full`
 
 | Order | Section | Prerequisite |
 |---|---|---|
-| 9 | F — RAG Service (F6 cross-source) | B + D indexing complete |
+| 9 | F -- RAG Service (F6 cross-source) | B + D indexing complete |
 
 > The automated scripts in `test/run-tests.sh` execute Phases 1 and 2 in sequence.
 

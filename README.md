@@ -33,10 +33,10 @@ The setup script handles everything for a first run. For manual control see [Fir
 The stack supports four source profiles. Start with `alfresco` if you only have Alfresco:
 
 ```bash
-make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~17 services)
-make up-nuxeo          # Nuxeo + HXPR + RAG  (~13 services)
-make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~19 services)
-make up-demo           # full + standalone demo UI at /  (~20 services)
+make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~21 services)
+make up-nuxeo          # Nuxeo + HXPR + RAG  (~14 services)
+make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~23 services)
+make up-demo           # full + standalone demo UI at /  (~24 services)
 ```
 
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
@@ -47,7 +47,7 @@ git clone https://github.com/aborroy/nuxeo-deployment.git ../nuxeo-deployment
 make up-full
 ```
 
-No other sibling checkout is required — all Java services build directly from GitHub via Docker BuildKit.
+No other sibling checkout is required -- all Java services build directly from GitHub via Docker BuildKit.
 
 Important: profiles `nuxeo`, `full`, and `demo` do not start the Nuxeo server itself. The proxy
 forwards `/nuxeo/*` to `http://host.docker.internal:8081`, so if `../nuxeo-deployment` is not
@@ -55,18 +55,18 @@ running you will get `502 Bad Gateway` on `http://localhost/nuxeo/`.
 
 ## Compose Layout
 
-The stack is split across five files. `compose.yaml` is the only entrypoint — it declares shared
+The stack is split across five files. `compose.yaml` is the only entrypoint -- it declares shared
 infrastructure (network, named volumes, build secrets) and pulls in the rest via `include:`.
 
 | File | Contents |
 |---|---|
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
-| [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, solr6\*, share\*, control-center\* |
+| [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, solr6\*, control-center\* |
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, idp, localstack, mockoon, router, rest, aio, opensearch-dashboards\* |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 
-Always run from the project root using `make` or `docker compose` — the included files are not
+Always run from the project root using `make` or `docker compose` -- the included files are not
 designed to be run in isolation.
 
 ## Documentation
@@ -211,7 +211,7 @@ Before redesigning the deployment, the non-negotiable Alfresco-side requirements
 - ActiveMQ configured for Alfresco Event2 so `live-ingester` can consume `alfresco.repo.event2`.
 - Alfresco Transform Core AIO for text extraction during ingestion.
 - Alfresco Search Services / Solr wired with `secureComms=secret`.
-- A reverse proxy exposing `/`, `/alfresco/`, `/share/`, `/api-explorer/`, `/api/rag/`, and `/solr/`.
+- A reverse proxy exposing `/`, `/alfresco/`, `/admin/`, `/api-explorer/`, `/api/rag/`, and `/solr/`.
 
 This repo vendors the required ACS module/config pieces locally and builds the rest of the stack around them.
 
@@ -221,7 +221,7 @@ This repo vendors the required ACS module/config pieces locally and builds the r
 - Vendored HXPR bootstrap assets under `hxpr/`
 - Local HXPR Docker build that clones and compiles the requested HXPR branch
 - Remote builds for `aborroy/content-lake-app` and `aborroy/alfresco-content-lake-ui`
-- Remote build for `aborroy/content-lake-app-ui` (demo profile) — no local clone needed
+- Remote build for `aborroy/content-lake-app-ui` (demo profile) -- no local clone needed
 - Docker Compose orchestration split across five focused `compose.*.yaml` files
 - A single nginx config template replacing per-mode nginx files
 
@@ -250,7 +250,7 @@ The `local` parameter sets all four `*_CONTEXT` overrides automatically and forc
 ## Prerequisites
 
 - Docker Desktop with Docker Compose v2
-- Docker Model Runner — enable in Docker Desktop settings, or install `docker-model-plugin` on Linux
+- Docker Model Runner -- enable in Docker Desktop settings, or install `docker-model-plugin` on Linux
 - Access to `ghcr.io` for Hyland images
 - Outbound access to GitHub so BuildKit can fetch the remote source contexts
 - HXPR build credentials: `MAVEN_USERNAME`, `MAVEN_PASSWORD`, `NEXUS_USERNAME`, `NEXUS_PASSWORD`
@@ -263,16 +263,16 @@ The HXPR build uses two authenticated artifact sources:
 - GitHub Packages: `https://maven.pkg.github.com/HylandSoftware/hxp-transform-service`
 - Hyland Nexus releases: `https://artifacts.alfresco.com/nexus/content/repositories/hylandsoftware-releases`
 
-**`MAVEN_USERNAME`** — your GitHub username.
+**`MAVEN_USERNAME`** -- your GitHub username.
 
-**`MAVEN_PASSWORD`** — a GitHub personal access token from [GitHub token settings](https://github.com/settings/tokens).
+**`MAVEN_PASSWORD`** -- a GitHub personal access token from [GitHub token settings](https://github.com/settings/tokens).
 Use a classic token from [Generate new token (classic)](https://github.com/settings/tokens/new) with at least `read:packages`.
 If the Hyland package is private in your organisation, your account must have read access to that package, and you may need to authorise the token for SSO.
 
-**`NEXUS_USERNAME` / `NEXUS_PASSWORD`** — credentials for your account on [Hyland Nexus](https://artifacts.alfresco.com/nexus/).
+**`NEXUS_USERNAME` / `NEXUS_PASSWORD`** -- credentials for your account on [Hyland Nexus](https://artifacts.alfresco.com/nexus/).
 If you do not already have access, request it from the Hyland/Alfresco team that provided your HXPR build access.
 
-**`HXPR_GIT_AUTH_TOKEN`** — only needed if `https://github.com/HylandSoftware/hxpr.git` is not cloneable anonymously.
+**`HXPR_GIT_AUTH_TOKEN`** -- only needed if `https://github.com/HylandSoftware/hxpr.git` is not cloneable anonymously.
 Use a GitHub classic token with `repo` scope, or a fine-grained token scoped to `HylandSoftware/hxpr` with read access to repository contents.
 
 ## First Run
@@ -497,7 +497,7 @@ See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running
 
 - The HXPR app is built from source during `docker compose up --build` using `HXPR_GIT_REF` (default: `master`).
 - HXPR source build requires both GitHub Packages credentials and Hyland Nexus credentials, passed as Compose build secrets sourced from environment variables.
-- All Content Lake Java services (`batch-ingester`, `live-ingester`, ingesters, `rag-service`) build from source fetched directly from GitHub — no local Java checkout needed.
+- All Content Lake Java services (`batch-ingester`, `live-ingester`, ingesters, `rag-service`) build from source fetched directly from GitHub -- no local Java checkout needed.
 - The repository model is injected directly into the Alfresco image from this repo.
 - The ACA UI is exposed at `/aca/` in every profile where it is enabled, so its context path stays stable across stacks.
 - The demo UI (`content-lake-app-ui`) is served at `/` only in the `demo` profile.

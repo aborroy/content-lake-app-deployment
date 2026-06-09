@@ -2,10 +2,10 @@
 # Content Lake — Deployment Makefile
 # =============================================================
 # Usage:
-#   make up-alfresco        Alfresco + HXPR + RAG + ACA UI  (~17 services)
-#   make up-nuxeo           Nuxeo + HXPR + RAG  (~13 services)
-#   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~19 services)
-#   make up-demo            Full + standalone demo UI at /  (~20 services)
+#   make up-alfresco        Alfresco + HXPR + RAG + ACA UI  (~21 services)
+#   make up-nuxeo           Nuxeo + HXPR + RAG  (~14 services)
+#   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~23 services)
+#   make up-demo            Full + standalone demo UI at /  (~24 services)
 #   make down               Stop all services
 #   make logs               Follow logs
 #   make ps                 Show service status
@@ -57,7 +57,7 @@ help: ## Show this help
 local: ## Placeholder target for 'local' parameter — use: make up-demo local
 	@:
 
-up-alfresco: ## Alfresco source — core services (~17)
+up-alfresco: ## Alfresco source -- core services (~21)
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui)..."
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \

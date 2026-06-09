@@ -1,4 +1,4 @@
-# Deployment — RAG Service
+# Deployment -- RAG Service
 
 The `rag-service` Spring Boot app provides semantic search, hybrid search, and RAG (Retrieval-
 Augmented Generation) over content indexed by the Content Lake ingesters.
@@ -7,11 +7,11 @@ Augmented Generation) over content indexed by the Content Lake ingesters.
 
 ## What It Does
 
-- **Semantic search** — kNN vector search against hxpr embeddings
-- **Hybrid search** — combines kNN with BM25 keyword search using Reciprocal Rank Fusion (RRF)
-- **RAG prompt** — retrieves context chunks and sends them with the user query to the configured LLM
-- **Streaming RAG** — same as RAG prompt but streams the LLM response via SSE
-- **Conversation memory** — maintains session state for multi-turn conversations
+- **Semantic search** -- kNN vector search against hxpr embeddings
+- **Hybrid search** -- combines kNN with BM25 keyword search using Reciprocal Rank Fusion (RRF)
+- **RAG prompt** -- retrieves context chunks and sends them with the user query to the configured LLM
+- **Streaming RAG** -- same as RAG prompt but streams the LLM response via SSE
+- **Conversation memory** -- maintains session state for multi-turn conversations
 
 The service is nearly source-agnostic: it queries hxpr directly and uses `source_type` from
 `cin_ingestProperties` to construct source-specific "open document" links (Alfresco Share URL vs.
@@ -32,7 +32,7 @@ Nuxeo Web UI URL).
 
 ```yaml
 hxpr:
-  base-url: http://hxpr-app:8082
+  base-url: http://hxpr-app:8080
   token-url: http://idp:8080/realms/hyland/protocol/openid-connect/token
   client-id: content-lake-client
   client-secret: ...
@@ -73,8 +73,8 @@ On Linux, override `MODEL_RUNNER_URL` (set as `spring.ai.openai.base-url`) to
 All `/api/rag/**` endpoints except `/api/rag/health` require **HTTP Basic Auth**. Credentials are
 validated against the configured content source(s):
 
-1. **Alfresco** — via `POST .../authentication/versions/1/tickets` (tried first)
-2. **Nuxeo** — via `GET .../api/v1/me` (tried if Alfresco is unreachable or unconfigured)
+1. **Alfresco** -- via `POST .../authentication/versions/1/tickets` (tried first)
+2. **Nuxeo** -- via `GET .../api/v1/me` (tried if Alfresco is unreachable or unconfigured)
 
 The authenticated username is then used to resolve the caller's group memberships (via the service
 account) and build the `sys_racl` permission filter passed to hxpr. This ensures search results are
@@ -87,12 +87,12 @@ scoped to documents the caller is actually allowed to read.
 Requests without a valid `Authorization: Basic ...` header receive **HTTP 401**.
 
 ```bash
-# Correct — with credentials
+# Correct -- with credentials
 curl -u admin:admin -X POST http://localhost/api/rag/search/semantic \
   -H 'Content-Type: application/json' \
   -d '{"query": "retention policy", "topK": 5}'
 
-# Rejected — no credentials → 401
+# Rejected -- no credentials → 401
 curl -X POST http://localhost/api/rag/search/semantic \
   -H 'Content-Type: application/json' \
   -d '{"query": "retention policy", "topK": 5}'
@@ -177,7 +177,7 @@ or reject the credentials, a `401 Unauthorized` is returned.
 
 The service account credentials (`ALFRESCO_INTERNAL_USERNAME` / `ALFRESCO_INTERNAL_PASSWORD`,
 `NUXEO_USERNAME` / `NUXEO_PASSWORD`) are used only for internal operations (group membership
-lookups, metadata enrichment) — they are never used to validate incoming requests.
+lookups, metadata enrichment) -- they are never used to validate incoming requests.
 
 ---
 
@@ -208,10 +208,10 @@ implementation if multiple rag-service instances or pod restarts are expected.
 
 Metrics are exposed via Micrometer at `/actuator/prometheus`. Key metrics:
 
-- `rag_requests_total` — total RAG requests
-- `rag_latency_seconds` — end-to-end latency
-- `search_results_count` — results returned per query
-- `embedding_requests_total` — embedding API calls
+- `rag_requests_total` -- total RAG requests
+- `rag_latency_seconds` -- end-to-end latency
+- `search_results_count` -- results returned per query
+- `embedding_requests_total` -- embedding API calls
 
 Health: `/actuator/health` (public, no auth required).
 Info: `/actuator/info` (public).
