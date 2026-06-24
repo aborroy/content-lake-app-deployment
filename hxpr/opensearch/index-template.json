@@ -1,0 +1,15 @@
+{
+  "index_patterns": ["nuxeo_embeddings", "nuxeo_embeddings_*"],
+  "priority": 500,
+  "template": {
+    "settings": {
+      "index": {
+        "knn": true,
+        "knn.derived_source.enabled": false
+      }
+    }
+  },
+  "_meta": {
+    "reason": "Workaround OpenSearch 3.5 derived_source bug: hybrid (knn + text match) searches fail the fetch phase with AlreadyClosed on the HNSW .vec files after a segment merge, surfaced to RAG as a 500. Storing the vector in _source (derived_source disabled) avoids fetch-time reconstruction. See AGENTS.md."
+  }
+}

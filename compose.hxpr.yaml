@@ -57,6 +57,25 @@ services:
     networks:
       - stack
 
+  # One-shot: registers the nuxeo_embeddings index template (disables OpenSearch 3.5
+  # derived_source to avoid the HNSW AlreadyClosed fetch bug) before hxpr-app creates
+  # the index. Exits 0 when done; hxpr-app waits on it via depends_on.
+  opensearch-init:
+    profiles: [alfresco, nuxeo, full, demo]
+    image: curlimages/curl:${CURL_TAG:-8.11.1}
+    restart: "no"
+    entrypoint: ["sh", "/init/init.sh"]
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+    volumes:
+      - ./hxpr/opensearch/init.sh:/init/init.sh:ro
+      - ./hxpr/opensearch/index-template.json:/init/index-template.json:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - stack
+
   opensearch-dashboards:
     profiles: [alfresco, nuxeo, full, demo]
     image: opensearchproject/opensearch-dashboards:${OPENSEARCH_TAG:-3.5.0}
@@ -207,6 +226,8 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
+      opensearch-init:
+        condition: service_completed_successfully
       localstack:
         condition: service_healthy
       idp:
