@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Build context: this directory (dockerfiles/batch-ingester)
 # App source supplied via additional_context named "code" (CONTENT_LAKE_GIT_CONTEXT)
-FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+FROM maven:3.9.11-eclipse-temurin-25-alpine AS build
 WORKDIR /workspace
 COPY --from=code pom.xml .
 COPY --from=code common/pom.xml common/pom.xml
@@ -29,7 +29,7 @@ RUN mkdir -p /layers \
  && JAR="$(ls -1 alfresco/alfresco-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 RUN apk add --no-cache gcompat
 RUN addgroup -S app && adduser -S -G app app
 WORKDIR /app
