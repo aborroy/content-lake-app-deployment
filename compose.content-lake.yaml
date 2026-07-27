@@ -120,6 +120,12 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/qwen2.5}
       LLM_TEMPERATURE: "0.3"
       LLM_MAX_TOKENS: "1024"
+      # The Spring AI OpenAI client defaults to a 10s total request timeout. Local Docker Model
+      # Runner generations routinely take 8-15s, so the default intermittently times out with
+      # "Total timeout 10000 ms elapsed" and RAG answers fail non-deterministically. Give
+      # generation room (retrieval is unaffected).
+      SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
+      SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
       RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-15}
       RAG_DEFAULT_MIN_SCORE: ${RAG_DEFAULT_MIN_SCORE:-0.0}
       RAG_MAX_CONTEXT_LENGTH: ${RAG_MAX_CONTEXT_LENGTH:-12000}
