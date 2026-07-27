@@ -2,11 +2,17 @@
 # run-tests.sh — Content Lake end-to-end test orchestrator.
 #
 # Runs from content-lake-app-deployment/:
-#   ./test/run-tests.sh
+#   ./test/run-tests.sh              # build from local sibling sources (../content-lake-app, …)
+#   USE_LOCAL=0 ./test/run-tests.sh  # build/pull from the git branches in .env instead
 #
-# Phase 1: start Alfresco stack → run Alfresco tests → stop.
-# Phase 2: start Nuxeo + content-lake → run Nuxeo tests → stop everything.
-# Phase 3: start full stack → run cross-source RAG tests → stop everything.
+# Phase 1: start Alfresco stack        (make up-alfresco) → Alfresco suite     → down.
+# Phase 2: start Nuxeo + content-lake  (make up-nuxeo)    → Nuxeo suite        → down.
+# Phase 3: start full stack            (make up-full)     → cross-source RAG + → down.
+#                                                            Sprint 0 advisor suite
+#
+# The Makefile profile targets own bringing up ../nuxeo-deployment and, in local mode,
+# building the Content Lake images from the sibling checkouts. `make down` also tears
+# down ../nuxeo-deployment, so this script no longer manages the Nuxeo server directly.
 
 set -uo pipefail
 
@@ -14,8 +20,44 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NUXEO_DIR="$(cd "$DEPLOY_DIR/../nuxeo-deployment" 2>/dev/null && pwd || true)"
 
+# Build from local sibling checkouts by default (this is a source-change test harness).
+# Pass USE_LOCAL=0 to use the images/contexts baked into .env instead.
+#
+# NOTE: we deliberately do NOT use `make up-<profile> local`. That target forces a
+# `--no-cache` rebuild of the WHOLE profile, including hxpr-app, whose Dockerfile clones the
+# private HylandSoftware/hxpr repo (SAML-gated) and needs Hyland Nexus creds. Instead we build
+# ONLY the local-source Content Lake app images (which is all a source change affects) and then
+# `up` WITHOUT `--build`, so the prebuilt hxpr/ACS/IDP images are reused. Build those
+# credential-gated images once via `make up-alfresco` before running this harness.
+USE_LOCAL="${USE_LOCAL:-1}"
+
+# The deployment proxy terminates TLS and 301-redirects http -> https, so probe and test over
+# HTTPS by default. Child suites read HOST/USE_HTTPS/*_AUTH from the environment.
+HOST="${HOST:-localhost}"
+USE_HTTPS="${USE_HTTPS:-true}"
+export HOST USE_HTTPS
+export ALF_AUTH="${ALF_AUTH:-admin:admin}"
+export NUXEO_AUTH="${NUXEO_AUTH:-Administrator:Administrator}"
+if [ "$USE_HTTPS" = "true" ]; then
+  SCHEME="https"; CURL_TLS="-k"
+else
+  SCHEME="http"; CURL_TLS=""
+fi
+BASE="${SCHEME}://${HOST}"
+
+# Sibling source contexts used when USE_LOCAL=1.
+export CONTENT_LAKE_GIT_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-../content-lake-app}"
+export CONTENT_LAKE_ACS_GIT_CONTEXT="${CONTENT_LAKE_ACS_GIT_CONTEXT:-../content-lake-app}"
+export CONTENT_LAKE_UI_GIT_CONTEXT="${CONTENT_LAKE_UI_GIT_CONTEXT:-../alfresco-content-lake-ui}"
+export CONTENT_LAKE_APP_UI_CONTEXT="${CONTENT_LAKE_APP_UI_CONTEXT:-../content-lake-app-ui}"
+
+# Local-source Content Lake app services affected by a code change, per profile.
+CL_APP_SERVICES_ALFRESCO="rag-service batch-ingester live-ingester"
+CL_APP_SERVICES_NUXEO="rag-service nuxeo-batch-ingester nuxeo-live-ingester"
+CL_APP_SERVICES_FULL="rag-service batch-ingester live-ingester nuxeo-batch-ingester nuxeo-live-ingester"
+
 G='\033[0;32m'; R='\033[0;31m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[1m'; N='\033[0m'
-banner() { printf "\n${B}${C}══════════════════════════════════════════════${N}\n${B}${C}  %s${N}\n${B}${C}══════════════════════════════════════════════${N}\n" "$*"; }
+banner() { printf "\n${B}${C}==============================================${N}\n${B}${C}  %s${N}\n${B}${C}==============================================${N}\n" "$*"; }
 info()  { printf "${C}[INFO]${N} %s\n" "$*"; }
 warn()  { printf "${Y}[WARN]${N} %s\n" "$*"; }
 die()   { printf "${R}[FATAL]${N} %s\n" "$*" >&2; exit 1; }
@@ -27,7 +69,16 @@ command -v docker >/dev/null 2>&1      || die "docker not found"
 command -v jq     >/dev/null 2>&1      || die "jq not found  (brew install jq)"
 command -v curl   >/dev/null 2>&1      || die "curl not found"
 docker compose version >/dev/null 2>&1 || die "docker compose v2 not found"
-ok "docker, jq, curl, docker-compose all present"
+make --version >/dev/null 2>&1         || die "make not found"
+ok "docker, jq, curl, docker-compose, make all present"
+
+# LLM/embedding backend (Docker Model Runner) — RAG generation needs it to be reachable.
+if curl -sf -m 5 http://localhost:12434/engines/v1/models >/dev/null 2>&1; then
+  ok "AI inference backend reachable on :12434"
+else
+  warn "AI inference backend not reachable on :12434 — RAG generation tests may fail."
+  warn "Enable Docker Model Runner (Docker Desktop) or run 'make start-ai'."
+fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 wait_for_url() {
@@ -35,10 +86,10 @@ wait_for_url() {
   local url="$1" auth="${2:-}" max="${3:-60}" interval="${4:-10}"
   local curl_auth=()
   [ -n "$auth" ] && curl_auth=(-u "$auth")
-  local i
+  local i code
   for i in $(seq 1 "$max"); do
-    local code
-    code=$(curl -sf -o /dev/null -w '%{http_code}' "${curl_auth[@]}" "$url" 2>/dev/null || echo 000)
+    # shellcheck disable=SC2086
+    code=$(curl -sf $CURL_TLS -o /dev/null -w '%{http_code}' "${curl_auth[@]}" "$url" 2>/dev/null || echo 000)
     if [ "$code" = "200" ]; then return 0; fi
     printf '.'
     sleep "$interval"
@@ -46,22 +97,52 @@ wait_for_url() {
   echo; return 1
 }
 
+# Compose invocation mirroring the Makefile's env wiring, without the Makefile's forced
+# `--no-cache` full-profile rebuild.
+dc() {
+  ( cd "$DEPLOY_DIR" \
+    && set -a && . ./.env && [ -f ./.env.local ] && . ./.env.local; set +a \
+    && NGINX_SYNC_DEFAULT_BACKEND="${NGINX_SYNC_DEFAULT_BACKEND:-batch-ingester:9090}" \
+       NGINX_ROOT_DIRECTIVE="${NGINX_ROOT_DIRECTIVE:-return 302 /aca/;}" \
+       docker compose --env-file .env.local "$@" )
+}
+
+stack_up() {
+  local profile="$1" services_var="CL_APP_SERVICES_${1^^}" services="${!services_var:-}"
+  # Nuxeo-backed profiles need the sibling nuxeo-deployment server.
+  if [ "$profile" != "alfresco" ] && [ -d "$NUXEO_DIR" ]; then
+    info "Bringing up ../nuxeo-deployment …"
+    ( cd "$NUXEO_DIR" && docker compose up -d ) || return 1
+  fi
+  if [ "$USE_LOCAL" = "1" ] && [ -n "$services" ]; then
+    info "Building local-source app images: $services"
+    # shellcheck disable=SC2086
+    dc --profile "$profile" build $services || return 1
+  fi
+  # `up` without --build: prebuilt hxpr/ACS/IDP images are reused; only missing images build.
+  dc --profile "$profile" up -d
+}
+
+stack_down() {
+  dc --profile '*' down
+  [ -d "$NUXEO_DIR" ] && ( cd "$NUXEO_DIR" && docker compose down 2>/dev/null || true )
+}
+
 # ── Phase 1: Alfresco ─────────────────────────────────────────────────────────
 banner "PHASE 1 — Alfresco + Content Lake"
 
-cd "$DEPLOY_DIR"
-info "Starting stack (STACK_MODE=alfresco) …"
-STACK_MODE=alfresco make up
+info "Starting Alfresco stack (profile=alfresco, local build=$USE_LOCAL) …"
+stack_up alfresco || die "Alfresco stack bring-up failed"
 
 info "Waiting for Alfresco (up to 10 min) …"
 wait_for_url \
-  'http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-/children' \
+  "$BASE/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-/children" \
   'admin:admin' 60 10 \
   || die "Alfresco did not become ready within 10 minutes"
 ok "Alfresco is up"
 
 info "Waiting for RAG service (up to 3 min) …"
-wait_for_url 'http://localhost/api/rag/health' '' 36 5 \
+wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200; proceeding anyway"
 ok "RAG service is up"
 
@@ -70,17 +151,17 @@ ALFRESCO_RC=0
 bash "$SCRIPT_DIR/test-alfresco.sh" || ALFRESCO_RC=$?
 
 banner "Stopping Alfresco stack"
-STACK_MODE=alfresco make down
+stack_down
 
 # ── Phase 2: Nuxeo ────────────────────────────────────────────────────────────
 banner "PHASE 2 — Nuxeo + Content Lake"
 
 [ -d "$NUXEO_DIR" ] \
-  || die "nuxeo-deployment not found at $NUXEO_DIR — clone it first:
+  || die "nuxeo-deployment not found at ../nuxeo-deployment — clone it first:
        git clone https://github.com/aborroy/nuxeo-deployment.git ../nuxeo-deployment"
 
-info "Starting nuxeo-deployment …"
-(cd "$NUXEO_DIR" && docker compose up -d)
+info "Starting Nuxeo stack (profile=nuxeo, local build=$USE_LOCAL) — also brings up ../nuxeo-deployment …"
+stack_up nuxeo || die "Nuxeo stack bring-up failed"
 
 info "Waiting for Nuxeo (up to 8 min) …"
 wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
@@ -88,12 +169,8 @@ wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
   || die "Nuxeo did not become ready within 8 minutes"
 ok "Nuxeo is up"
 
-info "Starting Content Lake Nuxeo services (STACK_MODE=nuxeo) …"
-cd "$DEPLOY_DIR"
-STACK_MODE=nuxeo make up
-
 info "Waiting for HXPR / RAG service …"
-wait_for_url 'http://localhost/api/rag/health' '' 36 5 \
+wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200; proceeding anyway"
 ok "RAG service is up"
 
@@ -104,18 +181,18 @@ banner "Running Nuxeo test suite"
 NUXEO_RC=0
 bash "$SCRIPT_DIR/test-nuxeo.sh" || NUXEO_RC=$?
 
+banner "Stopping Nuxeo stack"
+stack_down
+
 # ── Phase 3: Full stack ───────────────────────────────────────────────────────
 banner "PHASE 3 — Full Stack RAG"
 
-info "Stopping Content Lake Nuxeo-only services before full-stack start …"
-STACK_MODE=nuxeo make down
-
-info "Starting Content Lake full stack (STACK_MODE=full) …"
-STACK_MODE=full make up
+info "Starting full stack (profile=full, local build=$USE_LOCAL) …"
+stack_up full || die "Full stack bring-up failed"
 
 info "Waiting for Alfresco in full mode (up to 10 min) …"
 wait_for_url \
-  'http://localhost/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-/children' \
+  "$BASE/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-/children" \
   'admin:admin' 60 10 \
   || die "Alfresco did not become ready in full mode within 10 minutes"
 ok "Alfresco is up in full mode"
@@ -127,7 +204,7 @@ wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
 ok "Nuxeo is up"
 
 info "Waiting for RAG service …"
-wait_for_url 'http://localhost/api/rag/health' '' 36 5 \
+wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200 in full mode; proceeding anyway"
 ok "RAG service is up"
 
@@ -138,28 +215,27 @@ banner "Running full-stack RAG suite"
 FULL_RC=0
 bash "$SCRIPT_DIR/test-rag-full.sh" || FULL_RC=$?
 
+banner "Running Sprint 0 advisor-pipeline suite"
+ADVISOR_RC=0
+bash "$SCRIPT_DIR/test-rag-advisor.sh" || ADVISOR_RC=$?
+
 # ── Teardown ──────────────────────────────────────────────────────────────────
 banner "Stopping everything"
-cd "$DEPLOY_DIR"
-STACK_MODE=full make down
-(cd "$NUXEO_DIR" && docker compose down)
+stack_down
 
 # ── Final summary ─────────────────────────────────────────────────────────────
 banner "TEST RUN COMPLETE"
-if [ "$ALFRESCO_RC" -eq 0 ]; then
-  printf "${G}  Alfresco suite : PASSED${N}\n"
-else
-  printf "${R}  Alfresco suite : FAILED (exit %d)${N}\n" "$ALFRESCO_RC"
-fi
-if [ "$NUXEO_RC" -eq 0 ]; then
-  printf "${G}  Nuxeo suite    : PASSED${N}\n"
-else
-  printf "${R}  Nuxeo suite    : FAILED (exit %d)${N}\n" "$NUXEO_RC"
-fi
-if [ "$FULL_RC" -eq 0 ]; then
-  printf "${G}  Full RAG suite : PASSED${N}\n"
-else
-  printf "${R}  Full RAG suite : FAILED (exit %d)${N}\n" "$FULL_RC"
-fi
+summarize() {
+  local name="$1" rc="$2"
+  if [ "$rc" -eq 0 ]; then
+    printf "${G}  %-22s: PASSED${N}\n" "$name"
+  else
+    printf "${R}  %-22s: FAILED (exit %d)${N}\n" "$name" "$rc"
+  fi
+}
+summarize "Alfresco suite"        "$ALFRESCO_RC"
+summarize "Nuxeo suite"           "$NUXEO_RC"
+summarize "Full RAG suite"        "$FULL_RC"
+summarize "Sprint 0 advisor suite" "$ADVISOR_RC"
 echo ""
-[ "$ALFRESCO_RC" -eq 0 ] && [ "$NUXEO_RC" -eq 0 ] && [ "$FULL_RC" -eq 0 ]
+[ "$ALFRESCO_RC" -eq 0 ] && [ "$NUXEO_RC" -eq 0 ] && [ "$FULL_RC" -eq 0 ] && [ "$ADVISOR_RC" -eq 0 ]

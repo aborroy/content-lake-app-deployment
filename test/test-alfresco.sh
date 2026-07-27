@@ -97,6 +97,29 @@ upload_file() {
   fi
 }
 
+# wait_for_solr_indexed <folder_node_id> <expected_count>
+# Batch discovery runs through AFTS/Solr, which indexes newly uploaded nodes a few seconds
+# after upload returns 201. Syncing before Solr catches up discovers 0 nodes and completes
+# empty. Poll an AFTS PARENT query until the expected child count is visible (up to ~3 min).
+wait_for_solr_indexed() {
+  local folder_id="$1" expected="$2" elapsed=0 found
+  local search_url="${BASE}/alfresco/api/-default-/public/search/versions/1/search"
+  while [ $elapsed -lt 180 ]; do
+    found=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST \
+      "$search_url" \
+      -H 'Content-Type: application/json' \
+      -d "{\"query\":{\"language\":\"afts\",\"query\":\"PARENT:'workspace://SpacesStore/$folder_id' AND TYPE:'cm:content'\"},\"paging\":{\"maxItems\":100}}" \
+      2>/dev/null | jq -r '.list.pagination.totalItems // 0' 2>/dev/null || echo 0)
+    if [ "${found:-0}" -ge "$expected" ]; then
+      pass "B3a: Solr indexed $found/$expected uploaded files (ready to sync)"
+      return 0
+    fi
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  info "B3a: Solr showed only $found/$expected files after 3 min; syncing anyway"
+  return 0
+}
+
 # run_sync_wait <folder_node_id>
 # Triggers /api/sync/batch with an explicit folder and waits up to 5 min for COMPLETED.
 run_sync_wait() {
@@ -659,6 +682,9 @@ for entry in "short-memo.txt:$TXT_ID" "security-policy.txt:$SEC_ID" \
                  || fail "B2: Failed to upload $name"
 done
 
+# B3a: Wait for Solr to index the uploaded files so batch discovery finds them.
+wait_for_solr_indexed "$FOLDER_ID" 5
+
 # B3+B4: Trigger sync with explicit folder and wait
 run_sync_wait "$FOLDER_ID"
 
@@ -937,6 +963,8 @@ else
 fi
 
 # G8: Ingest the folder subtree so both files are in hxpr before any ACL change.
+# Wait for Solr to index both uploaded children first (batch discovery is AFTS-based).
+wait_for_solr_indexed "$PERM_FOLDER_ID" 2
 info "G8: Triggering batch sync for perm-propagation-test folder …"
 if run_sync_wait "$PERM_FOLDER_ID"; then
   pass "G8: Batch sync completed"
