@@ -118,8 +118,12 @@ services:
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
       LLM_MODEL: ${LLM_MODEL:-ai/qwen2.5}
-      LLM_TEMPERATURE: "0.3"
-      LLM_MAX_TOKENS: "1024"
+      # Pinned to 0 so a generation delta is attributable to a change rather than to sampling
+      # noise: at 0.3 the same question yields a different answer per run, and the tier-2 judge
+      # metrics (faithfulness, answer_correctness, citation_accuracy) cannot form a stable
+      # baseline. Overridable per environment for deployments that want more varied phrasing.
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
       # The Spring AI OpenAI client defaults to a 10s total request timeout. Local Docker Model
       # Runner generations routinely take 8-15s, so the default intermittently times out with
       # "Total timeout 10000 ms elapsed" and RAG answers fail non-deterministically. Give
