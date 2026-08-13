@@ -619,7 +619,9 @@ code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_
                      || fail "A1: Batch ingester status returned HTTP $code"
 
 # A2: RAG service health
-rag_health=$(curl -sf "$RAG_URL/health" 2>/dev/null || echo '{}')
+# Must pass CURL_OPTS (-k for the self-signed TLS proxy) and auth, exactly like A1; without -k the
+# -sf call silently fails on the cert and reports a false UNKNOWN even when the service is UP.
+rag_health=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$RAG_URL/health" 2>/dev/null || echo '{}')
 rag_status=$(echo "$rag_health" | jq -r '.status // "UNKNOWN"')
 [ "$rag_status" = "UP" ] && pass "A2: RAG service is UP (embedding, hxpr, llm all healthy)" \
                            || fail "A2: RAG service status=$rag_status (expected UP)"

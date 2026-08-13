@@ -131,9 +131,39 @@ services:
       RAG_MAX_CONTEXT_LENGTH: ${RAG_MAX_CONTEXT_LENGTH:-12000}
       RAG_USE_HYBRID_SEARCH: ${RAG_USE_HYBRID_SEARCH:-true}
       SEMANTIC_SEARCH_MIN_SCORE: ${SEMANTIC_SEARCH_MIN_SCORE:-0.2}
+      # Retrieval tunables. `environment` is an explicit mapping, so a variable absent from this
+      # block never reaches the container however it is set on the host: the service silently keeps
+      # its application.yml default. Every knob `content-lake-eval/config/sweeps/` varies must
+      # therefore be listed here, or that sweep point measures the default and reports no change.
+      # Fusion: weighted/minmax 50-50, measured as sprint 3 (content-lake-eval runs/sprint-3).
+      # It beats the rrf default on every gated metric at once (recall@10 0.8143 -> 0.8286,
+      # mrr 0.6760 -> 0.6830, ndcg@10 0.7021 -> 0.7083, hit_rate@10 0.8286 -> 0.8429) and lowers
+      # latency (search p95 749 -> 628ms). RRF keeps only rank, so a document the vector leg ranked
+      # 26th can enter a ten-slot pool on keyword rank alone; minmax keeps each leg's score margin,
+      # so a deep-vector-rank document must be a strong keyword match in absolute terms to displace
+      # a better one. Normalisation is what matters here, not the weights: max-50-50 was the worst
+      # of the eight points swept and minmax-50-50 the best.
+      SEARCH_HYBRID_STRATEGY: ${SEARCH_HYBRID_STRATEGY:-weighted}
+      SEARCH_HYBRID_NORMALIZATION: ${SEARCH_HYBRID_NORMALIZATION:-minmax}
+      SEARCH_HYBRID_VECTOR_WEIGHT: ${SEARCH_HYBRID_VECTOR_WEIGHT:-0.5}
+      SEARCH_HYBRID_TEXT_WEIGHT: ${SEARCH_HYBRID_TEXT_WEIGHT:-0.5}
+      # Only read when SEARCH_HYBRID_STRATEGY is rrf. Swept: k20 edges k60 on ranking, k120 is
+      # identical to k60, and all three trail weighted/minmax.
+      SEARCH_HYBRID_RRF_K: ${SEARCH_HYBRID_RRF_K:-60}
+      SEARCH_HYBRID_INITIAL_CANDIDATES: ${SEARCH_HYBRID_INITIAL_CANDIDATES:-75}
+      SEARCH_HYBRID_FINAL_RESULTS: ${SEARCH_HYBRID_FINAL_RESULTS:-20}
+      # Keep at or near 0 on the hybrid path. Fused scores are on the fusion's own scale, not
+      # cosine's: under rrf they span roughly 0.02-0.03, so a cosine-looking 0.1 discards every
+      # result (measured: recall@10 0.0000, zero_result_rate 1.0000 at 0.1, 0.2 and 0.4).
+      SEARCH_HYBRID_MIN_SCORE: ${SEARCH_HYBRID_MIN_SCORE:-0.01}
+      RAG_MMR_ENABLED: ${RAG_MMR_ENABLED:-false}
+      RAG_MMR_LAMBDA: ${RAG_MMR_LAMBDA:-0.5}
+      RAG_MMR_POOL_SIZE: ${RAG_MMR_POOL_SIZE:-30}
       # Reranker: disabled by default (local/Docker Model Runner). To enable with compose.ai.yaml,
       # set RAG_RERANKER_URL=http://host.docker.internal:12435 in the environment or .env file.
       RAG_RERANKER_URL: ${RAG_RERANKER_URL:-}
+      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
+      RAG_RERANKER_TOP_N: ${RAG_RERANKER_TOP_N:-8}
       RAG_SOURCE_LINKS_ALFRESCO_TEMPLATE: "/aca/#/search/(viewer:view/{nodeId})?location=%2Frag"
       RAG_SOURCE_LINKS_NUXEO_TEMPLATE: "/nuxeo/ui/#!/browse{nuxeoPath}"
     extra_hosts:

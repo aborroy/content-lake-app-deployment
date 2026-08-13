@@ -8,7 +8,8 @@
 # Phase 1: start Alfresco stack        (make up-alfresco) → Alfresco suite     → down.
 # Phase 2: start Nuxeo + content-lake  (make up-nuxeo)    → Nuxeo suite        → down.
 # Phase 3: start full stack            (make up-full)     → cross-source RAG + → down.
-#                                                            Sprint 0 advisor suite
+#                                                            Sprint 0 advisor suite +
+#                                                            retrieval quality gate
 #
 # The Makefile profile targets own bringing up ../nuxeo-deployment and, in local mode,
 # building the Content Lake images from the sibling checkouts. `make down` also tears
@@ -108,7 +109,9 @@ dc() {
 }
 
 stack_up() {
-  local profile="$1" services_var="CL_APP_SERVICES_${1^^}" services="${!services_var:-}"
+  local profile="$1"
+  local services_var="CL_APP_SERVICES_${profile^^}"
+  local services="${!services_var:-}"
   # Nuxeo-backed profiles need the sibling nuxeo-deployment server.
   if [ "$profile" != "alfresco" ] && [ -d "$NUXEO_DIR" ]; then
     info "Bringing up ../nuxeo-deployment …"
@@ -219,6 +222,17 @@ banner "Running Sprint 0 advisor-pipeline suite"
 ADVISOR_RC=0
 bash "$SCRIPT_DIR/test-rag-advisor.sh" || ADVISOR_RC=$?
 
+# Retrieval-quality gate. Exit 2 means prerequisites are missing (no uv, no committed baseline),
+# which is a skip rather than a failure.
+banner "Running retrieval-quality gate"
+EVAL_RC=0
+bash "$SCRIPT_DIR/test-rag-eval.sh" || EVAL_RC=$?
+if [ "$EVAL_RC" -eq 2 ]; then
+  warn "Retrieval-quality gate skipped (prerequisites missing)"
+  EVAL_RC=0
+  EVAL_SKIPPED=1
+fi
+
 # ── Teardown ──────────────────────────────────────────────────────────────────
 banner "Stopping everything"
 stack_down
@@ -237,5 +251,11 @@ summarize "Alfresco suite"        "$ALFRESCO_RC"
 summarize "Nuxeo suite"           "$NUXEO_RC"
 summarize "Full RAG suite"        "$FULL_RC"
 summarize "Sprint 0 advisor suite" "$ADVISOR_RC"
+if [ "${EVAL_SKIPPED:-0}" = "1" ]; then
+  printf "${Y}  %-22s: SKIPPED${N}\n" "Retrieval quality gate"
+else
+  summarize "Retrieval quality gate" "$EVAL_RC"
+fi
 echo ""
-[ "$ALFRESCO_RC" -eq 0 ] && [ "$NUXEO_RC" -eq 0 ] && [ "$FULL_RC" -eq 0 ] && [ "$ADVISOR_RC" -eq 0 ]
+[ "$ALFRESCO_RC" -eq 0 ] && [ "$NUXEO_RC" -eq 0 ] && [ "$FULL_RC" -eq 0 ] \
+  && [ "$ADVISOR_RC" -eq 0 ] && [ "$EVAL_RC" -eq 0 ]
