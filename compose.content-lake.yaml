@@ -163,6 +163,49 @@ services:
       RAG_MMR_ENABLED: ${RAG_MMR_ENABLED:-false}
       RAG_MMR_LAMBDA: ${RAG_MMR_LAMBDA:-0.5}
       RAG_MMR_POOL_SIZE: ${RAG_MMR_POOL_SIZE:-30}
+      # Query expansion (sprint 2). Off by default, and the reason is latency, not quality: every
+      # technique measured beats the control on all four gated retrieval metrics, but each adds one LLM
+      # rewrite call plus an embedding and hxpr round trip per variant, and on a local Docker Model
+      # Runner that call dominates. Measured on the eval-005 corpus (78 questions, 41 docs), against
+      # off = recall@10 0.8286 / mrr 0.6830 / ndcg@10 0.7083 / hit_rate@10 0.8429, search p50 423ms:
+      #
+      #   multi-query 2 variants   recall 0.8643  mrr 0.7217  ndcg 0.7477  hit 0.8857  p50 4083ms
+      #   multi-query 3 variants   recall 0.8500  mrr 0.7307  ndcg 0.7445  hit 0.8857  p50 4818ms
+      #   multi-query 3 + rrf-k 20 recall 0.8500  mrr 0.7479  ndcg 0.7544  hit 0.8857  p50 4806ms
+      #   multi-query 5 variants   recall 0.8571  mrr 0.7100  ndcg 0.7360  hit 0.8857  p50 6387ms
+      #   HyDE 1000 chars          recall 0.8429  mrr 0.6879  ndcg 0.7184  hit 0.8571  p50 3581ms
+      #   HyDE 400 chars           recall 0.8429  mrr 0.6950  ndcg 0.7236  hit 0.8571  p50 3516ms
+      #   HyDE + multi-query 3     recall 0.8500  mrr 0.7216  ndcg 0.7382  hit 0.8857  p50 8551ms
+      #
+      # So multi-query is the technique that earns its place, ~11x search latency is the price, and the
+      # exact variant count is within noise on 78 questions. HyDE on top of multi-query costs latency
+      # and slightly LOWERS mrr/ndcg versus multi-query alone, so the two do not compose.
+      # keyword_leg_hit_rate held at 1.0000 and zero_result_rate at 0.0000 on every point.
+      #
+      # RAG_QUERY_EXPANSION_MAX_VARIANTS caps the total, counting the original query, however many
+      # techniques are on. RAG_QUERY_EXPANSION_RRF_K fuses across variants and is distinct from
+      # SEARCH_HYBRID_RRF_K, which fuses the vector and keyword legs of one variant.
+      RAG_QUERY_EXPANSION_MAX_VARIANTS: ${RAG_QUERY_EXPANSION_MAX_VARIANTS:-6}
+      RAG_QUERY_EXPANSION_RRF_K: ${RAG_QUERY_EXPANSION_RRF_K:-60}
+      RAG_MULTI_QUERY_ENABLED: ${RAG_MULTI_QUERY_ENABLED:-false}
+      RAG_MULTI_QUERY_VARIANTS: ${RAG_MULTI_QUERY_VARIANTS:-3}
+      RAG_HYDE_ENABLED: ${RAG_HYDE_ENABLED:-false}
+      RAG_HYDE_MAX_CHARS: ${RAG_HYDE_MAX_CHARS:-1000}
+      # Decomposition is the one technique the sweep argues AGAINST at tier 0: recall@10 stays flat at
+      # 0.8286 while mrr falls 0.6830 -> 0.6477 and ndcg@10 0.7083 -> 0.6853, at both max-2 and max-4.
+      # Sub-questions dilute the ranking without surfacing evidence the original query missed. Its real
+      # target is tier-2 completeness (0.5766), which tier 0 cannot see, so this is "unproven", not
+      # "useless" -- but it does not go on by default on a ranking regression.
+      RAG_QUERY_DECOMPOSITION_ENABLED: ${RAG_QUERY_DECOMPOSITION_ENABLED:-false}
+      RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS: ${RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS:-4}
+      # Self-RAG gate. RAG_RETRIEVAL_GRADING_MIN_SCORE is on the fusion's own scale, not cosine's:
+      # under the committed weighted/minmax strategy hit scores span 0-1, but under rrf they span
+      # roughly 0.02-0.03, so a threshold carried over from one strategy discards everything under the
+      # other. 0.0 leaves the gate inert even when enabled, which is the safe default.
+      RAG_RETRIEVAL_GRADING_ENABLED: ${RAG_RETRIEVAL_GRADING_ENABLED:-false}
+      RAG_RETRIEVAL_GRADING_MIN_SCORE: ${RAG_RETRIEVAL_GRADING_MIN_SCORE:-0.0}
+      RAG_RETRIEVAL_GRADING_MIN_HITS: ${RAG_RETRIEVAL_GRADING_MIN_HITS:-1}
+      RAG_RETRIEVAL_GRADING_BROADEN: ${RAG_RETRIEVAL_GRADING_BROADEN:-true}
       # Reranker: disabled by default (local/Docker Model Runner). To enable with compose.ai.yaml,
       # set RAG_RERANKER_URL=http://host.docker.internal:12435 in the environment or .env file.
       RAG_RERANKER_URL: ${RAG_RERANKER_URL:-}
