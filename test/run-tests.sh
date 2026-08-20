@@ -46,11 +46,12 @@ else
 fi
 BASE="${SCHEME}://${HOST}"
 
-# Sibling source contexts used when USE_LOCAL=1.
-export CONTENT_LAKE_GIT_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-../content-lake-app}"
-export CONTENT_LAKE_ACS_GIT_CONTEXT="${CONTENT_LAKE_ACS_GIT_CONTEXT:-../content-lake-app}"
-export CONTENT_LAKE_UI_GIT_CONTEXT="${CONTENT_LAKE_UI_GIT_CONTEXT:-../alfresco-content-lake-ui}"
-export CONTENT_LAKE_APP_UI_CONTEXT="${CONTENT_LAKE_APP_UI_CONTEXT:-../content-lake-app-ui}"
+# Sibling source contexts used when USE_LOCAL=1. Held in separate names because dc() sources .env,
+# which would otherwise clobber these (see the comment on dc()).
+LOCAL_CL_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-../content-lake-app}"
+LOCAL_CL_ACS_CONTEXT="${CONTENT_LAKE_ACS_GIT_CONTEXT:-../content-lake-app}"
+LOCAL_CL_UI_CONTEXT="${CONTENT_LAKE_UI_GIT_CONTEXT:-../alfresco-content-lake-ui}"
+LOCAL_CL_APP_UI_CONTEXT="${CONTENT_LAKE_APP_UI_CONTEXT:-../content-lake-app-ui}"
 
 # Local-source Content Lake app services affected by a code change, per profile.
 CL_APP_SERVICES_ALFRESCO="rag-service batch-ingester live-ingester"
@@ -101,11 +102,32 @@ wait_for_url() {
 # Compose invocation mirroring the Makefile's env wiring, without the Makefile's forced
 # `--no-cache` full-profile rebuild.
 dc() {
+  # The build contexts are re-applied AFTER sourcing .env, not merely exported above. `set -a; . ./.env`
+  # assigns unconditionally, and .env pins
+  # CONTENT_LAKE_GIT_CONTEXT=https://github.com/aborroy/content-lake-app.git#main, so an export made
+  # before this function is overwritten and USE_LOCAL=1 silently builds and tests origin/main instead of
+  # the sibling checkout. That failure is invisible: the build succeeds, the suites pass, and the
+  # retrieval gate reports no delta because it measured the unchanged code.
   ( cd "$DEPLOY_DIR" \
     && set -a && . ./.env && [ -f ./.env.local ] && . ./.env.local; set +a \
+    && if [ "$USE_LOCAL" = "1" ]; then
+         CONTENT_LAKE_GIT_CONTEXT="$LOCAL_CL_CONTEXT"
+         CONTENT_LAKE_ACS_GIT_CONTEXT="$LOCAL_CL_ACS_CONTEXT"
+         CONTENT_LAKE_UI_GIT_CONTEXT="$LOCAL_CL_UI_CONTEXT"
+         CONTENT_LAKE_APP_UI_CONTEXT="$LOCAL_CL_APP_UI_CONTEXT"
+         export CONTENT_LAKE_GIT_CONTEXT CONTENT_LAKE_ACS_GIT_CONTEXT \
+                CONTENT_LAKE_UI_GIT_CONTEXT CONTENT_LAKE_APP_UI_CONTEXT
+       fi \
     && NGINX_SYNC_DEFAULT_BACKEND="${NGINX_SYNC_DEFAULT_BACKEND:-batch-ingester:9090}" \
        NGINX_ROOT_DIRECTIVE="${NGINX_ROOT_DIRECTIVE:-return 302 /aca/;}" \
        docker compose --env-file .env.local "$@" )
+}
+
+# Asserts the running rag-service is the image we just built, not a stale or remote-built one.
+assert_local_build() {
+  local marker="/app/BOOT-INF/classes/org/hyland/contentlake/rag/service/QueryExpansionService.class"
+  docker exec content-lake-app-rag-service-1 sh -c "ls $marker" >/dev/null 2>&1 \
+    || warn "running rag-service does not carry $(basename "$marker"): is it built from $LOCAL_CL_CONTEXT?"
 }
 
 stack_up() {
@@ -148,6 +170,7 @@ info "Waiting for RAG service (up to 3 min) …"
 wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200; proceeding anyway"
 ok "RAG service is up"
+assert_local_build
 
 banner "Running Alfresco test suite"
 ALFRESCO_RC=0
@@ -176,6 +199,7 @@ info "Waiting for HXPR / RAG service …"
 wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200; proceeding anyway"
 ok "RAG service is up"
+assert_local_build
 
 info "Waiting 30 s for Nuxeo ingesters to initialise …"
 sleep 30
@@ -210,6 +234,7 @@ info "Waiting for RAG service …"
 wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200 in full mode; proceeding anyway"
 ok "RAG service is up"
+assert_local_build
 
 info "Waiting 30 s for full-stack ingesters to initialise …"
 sleep 30
