@@ -11,10 +11,17 @@
 set -uo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
+# Honor USE_HTTPS for proxy-fronted URLs: the nginx proxy 301-redirects http->https, so tests
+# must target the same scheme the harness runs under. The direct Nuxeo port (8081) is not behind
+# the proxy and stays http. The curl wrapper injects -k for the proxy's self-signed cert.
+SCHEME="http"; CURL_TLS=""
+if [ "${USE_HTTPS:-false}" = "true" ]; then SCHEME="https"; CURL_TLS="-k"; fi
+curl() { command curl ${CURL_TLS} "$@"; }
+
 NUXEO_BASE='http://localhost:8081/nuxeo/api/v1'
 NUXEO_AUTH='Administrator:Administrator'
-SYNC_URL='http://localhost/api/sync'
-RAG_URL='http://localhost/api/rag'
+SYNC_URL="${SCHEME}://localhost/api/sync"
+RAG_URL="${SCHEME}://localhost/api/rag"
 NUXEO_INCLUDED_ROOT="${NUXEO_INCLUDED_ROOT:-/default-domain/workspaces/content-lake-demo}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -14,14 +14,21 @@
 
 set -uo pipefail
 
-ALF_BASE='http://localhost/alfresco/api/-default-/public/alfresco/versions/1'
-ALF_TICKET_URL='http://localhost/alfresco/api/-default-/public/authentication/versions/1/tickets'
+# Honor USE_HTTPS for proxy-fronted URLs: the nginx proxy 301-redirects http->https, so tests
+# must target the same scheme the harness runs under. The direct Nuxeo port (8081) is not behind
+# the proxy and stays http. The curl wrapper injects -k for the proxy's self-signed cert.
+SCHEME="http"; CURL_TLS=""
+if [ "${USE_HTTPS:-false}" = "true" ]; then SCHEME="https"; CURL_TLS="-k"; fi
+curl() { command curl ${CURL_TLS} "$@"; }
+
+ALF_BASE="${SCHEME}://localhost/alfresco/api/-default-/public/alfresco/versions/1"
+ALF_TICKET_URL="${SCHEME}://localhost/alfresco/api/-default-/public/authentication/versions/1/tickets"
 ALF_AUTH='admin:admin'
 NUXEO_BASE='http://localhost:8081/nuxeo/api/v1'
 NUXEO_LOGIN_URL='http://localhost:8081/nuxeo/site/automation/login'
 NUXEO_AUTH='Administrator:Administrator'
-SYNC_URL='http://localhost/api/sync'
-RAG_URL='http://localhost/api/rag'
+SYNC_URL="${SCHEME}://localhost/api/sync"
+RAG_URL="${SCHEME}://localhost/api/rag"
 SHARED_USER='rag-user'
 SHARED_PASSWORD='password'
 
