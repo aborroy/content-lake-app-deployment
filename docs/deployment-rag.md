@@ -53,14 +53,15 @@ search:
     strategy: rrf          # rrf or weighted
     vector-weight: 0.7
     text-weight: 0.3
-    initial-candidates: 20
-    final-results: 5
+    initial-candidates: 75
+    final-results: 20
 
 rag:
-  max-chunks: 10
-  chunk-overlap: 0
-  rerank:
-    enabled: false         # enable when a cross-encoder model is available
+  default-top-k: 15
+  default-min-score: 0.01
+  max-context-length: 20000
+  reranker:
+    enabled: false         # enable when a reranker endpoint is available
 ```
 
 On Linux, override `MODEL_RUNNER_URL` (set as `spring.ai.openai.base-url`) to
@@ -140,7 +141,7 @@ Authorization: Basic <base64(user:password)>
 Content-Type: application/json
 
 {
-  "query": "What is our document retention policy?",
+  "question": "What is our document retention policy?",
   "topK": 5
 }
 ```
@@ -155,7 +156,7 @@ Accept: text/event-stream
 
 {
   "sessionId": "optional-session-id",
-  "query": "What is our document retention policy?"
+  "question": "What is our document retention policy?"
 }
 ```
 
@@ -176,11 +177,21 @@ faithfulness signals. Disabled unless `RAG_EVALUATION_ENABLED=true`. This is a q
 check, not the quality gate: the `content-lake-eval` harness (`cleval run` / `cleval compare`) remains
 the authoritative RAGAS-style measurement.
 
-Opt-in retrieval/generation flags added alongside it (all default off): `RAG_RETRIEVAL_SMALL_TO_BIG_ENABLED`
-(expand a hit to its parent section), `RAG_CITATION_VERIFY_ENABLED` (flag answer claims unsupported by
-the cited context, adding `verified` / `unsupportedClaims` to the prompt response),
-`RAG_CONVERSATION_SUMMARY_ENABLED` (persistent running summary under the hxpr `_sessions/` folder), and
-per-request `inferFilters` on `/api/rag/prompt` (LLM-inferred date/mime/path filters).
+`compose.content-lake.yaml` exposes the rag-service retrieval and generation knobs as environment
+variables, all **default off**, so the baseline pipeline is unchanged unless a flag is set:
+
+- Re-ranking and diversification: `RAG_RERANKER_ENABLED` (`RAG_RERANKER_URL`, `RAG_RERANKER_TOP_N`),
+  `RAG_MMR_ENABLED` (`RAG_MMR_LAMBDA`, `RAG_MMR_POOL_SIZE`).
+- Query expansion and self-RAG: `RAG_MULTI_QUERY_ENABLED`, `RAG_HYDE_ENABLED`,
+  `RAG_QUERY_DECOMPOSITION_ENABLED`, and the relevance gate `RAG_RETRIEVAL_GRADING_ENABLED`.
+- Context and generation: `RAG_RETRIEVAL_SMALL_TO_BIG_ENABLED` (expand a hit to its parent section),
+  `RAG_CITATION_VERIFY_ENABLED` (flag answer claims unsupported by the cited context, adding
+  `verified` / `unsupportedClaims` to the prompt response), `RAG_CONVERSATION_SUMMARY_ENABLED`
+  (persistent running summary under the hxpr `_sessions/` folder), and per-request `inferFilters` on
+  `/api/rag/prompt` (LLM-inferred date/mime/path filters).
+- Graph-augmented retrieval: `RAG_GRAPH_ENABLED` turns on the rag-service `/api/rag/graph-prompt`
+  endpoint and graph expansion; the graph backend and provisioning are covered in
+  [deployment-graph.md](deployment-graph.md).
 
 ### Health check (public)
 
