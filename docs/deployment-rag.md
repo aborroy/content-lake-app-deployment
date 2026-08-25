@@ -159,6 +159,29 @@ Accept: text/event-stream
 }
 ```
 
+### Evaluation smoke check (opt-in)
+
+```http
+POST /api/rag/evaluate
+Authorization: Basic <base64(user:password)>
+Content-Type: application/json
+
+[
+  {"question": "...", "expectedAnswer": "...", "expectedSourceIds": ["policy.txt"]}
+]
+```
+
+Runs a small caller-supplied sample set through the pipeline and returns coarse retrieval-hit and
+faithfulness signals. Disabled unless `RAG_EVALUATION_ENABLED=true`. This is a quick in-cluster sanity
+check, not the quality gate: the `content-lake-eval` harness (`cleval run` / `cleval compare`) remains
+the authoritative RAGAS-style measurement.
+
+Opt-in retrieval/generation flags added alongside it (all default off): `RAG_RETRIEVAL_SMALL_TO_BIG_ENABLED`
+(expand a hit to its parent section), `RAG_CITATION_VERIFY_ENABLED` (flag answer claims unsupported by
+the cited context, adding `verified` / `unsupportedClaims` to the prompt response),
+`RAG_CONVERSATION_SUMMARY_ENABLED` (persistent running summary under the hxpr `_sessions/` folder), and
+per-request `inferFilters` on `/api/rag/prompt` (LLM-inferred date/mime/path filters).
+
 ### Health check (public)
 
 ```http
