@@ -24,6 +24,12 @@ SYNC_URL="${SCHEME}://localhost/api/sync"
 RAG_URL="${SCHEME}://localhost/api/rag"
 NUXEO_INCLUDED_ROOT="${NUXEO_INCLUDED_ROOT:-/default-domain/workspaces/content-lake-demo}"
 
+# The demo fixture script (create-nuxeo-demo-file.sh) defaults BASE_URL to the content-lake proxy
+# (http://localhost/nuxeo), which 301-redirects http->https; its curl follows neither redirects nor
+# the self-signed cert, so every fixture create returns 301 and fails. Point the child script at
+# Nuxeo directly - the same endpoint this suite verifies against ($NUXEO_BASE).
+export BASE_URL="${BASE_URL:-http://localhost:8081/nuxeo}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_SCRIPT="$SCRIPT_DIR/../scripts/create-nuxeo-demo-file.sh"
 
