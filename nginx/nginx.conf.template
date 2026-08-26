@@ -100,6 +100,18 @@ http {
             proxy_pass http://$rag_service_upstream;
         }
 
+        # Operational status snapshot (rag-service, authenticated).
+        location /api/status {
+            proxy_pass http://$rag_service_upstream;
+        }
+
+        # MCP server endpoint (rag-service). Authenticated like every other rag route; SSE-friendly.
+        location /mcp {
+            proxy_pass http://$rag_service_upstream;
+            proxy_buffering off;
+            proxy_read_timeout 300s;
+        }
+
         location /admin {
             proxy_pass http://$control_center_upstream;
         }
@@ -220,6 +232,18 @@ http {
 
         location /api/rag {
             proxy_pass http://$rag_service_upstream;
+        }
+
+        # Operational status snapshot (rag-service, authenticated).
+        location /api/status {
+            proxy_pass http://$rag_service_upstream;
+        }
+
+        # MCP server endpoint (rag-service). Authenticated like every other rag route; SSE-friendly.
+        location /mcp {
+            proxy_pass http://$rag_service_upstream;
+            proxy_buffering off;
+            proxy_read_timeout 300s;
         }
 
         location /admin {

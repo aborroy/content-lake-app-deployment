@@ -62,7 +62,23 @@ rag:
   max-context-length: 20000
   reranker:
     enabled: false         # enable when a reranker endpoint is available
+  prompt-injection:        # defend against injected instructions in retrieved content
+    defense-enabled: false # wrap chunks as untrusted data + reinforce in the prompt
+    scan-enabled: false    # log chunks matching known injection patterns (does not drop them)
+  rate-limit:              # per-principal request throttling
+    enabled: false
+    generate-requests-per-minute: 20   # /api/rag/prompt, /api/rag/chat/stream, /api/rag/graph-prompt
+    search-requests-per-minute: 60     # /api/rag/search/**
+  agentic-tools:           # let the LLM call retrieval tools mid-answer
+    enabled: false
+    max-iterations: 2      # additional retrieval rounds allowed per request
+  mcp:
+    enabled: true          # expose the MCP server (behind the same auth chain)
 ```
+
+The prompt-injection, rate-limit, and agentic-tools features default to **off** so the retrieval and
+generation baseline is unchanged; enable them per deployment. The MCP server defaults to **on** but is
+never anonymously reachable (see below).
 
 On Linux, override `MODEL_RUNNER_URL` (set as `spring.ai.openai.base-url`) to
 `http://host.docker.internal:12434` in `.env.local`.
@@ -142,9 +158,15 @@ Content-Type: application/json
 
 {
   "question": "What is our document retention policy?",
-  "topK": 5
+  "topK": 5,
+  "responseFormat": "STRUCTURED"
 }
 ```
+
+`responseFormat` (default `TEXT`) is optional. When set to `STRUCTURED`, the response includes an
+additional `structured` object (`{summary, keyPoints[], citations[]}`) derived from the answer in a
+second pass; the free-text `answer` field is always present and unchanged, so existing callers are
+unaffected.
 
 ### Streaming RAG (SSE)
 
@@ -198,6 +220,69 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
 ```http
 GET /api/rag/health
 ```
+
+### Operational status (authenticated)
+
+```http
+GET /api/status
+Authorization: Basic <base64(user:password)>
+```
+
+Returns hxpr connectivity, per-source indexed document counts (`cin_sourceId` -> count), and
+embedding/model-runner reachability in one snapshot. Authenticated, since per-source counts are
+information disclosure. Custom `hxpr` and `modelRunner` health contributors also appear under
+`/actuator/health` (component details shown to authenticated callers).
+
+The batch ingesters (`alfresco-batch-ingester`, `nuxeo-batch-ingester`, `filesystem-batch-ingester`)
+each expose their own `GET /api/status` with the last run's timestamp and discovered / indexed /
+failed counts; the detailed per-job view remains at `GET /api/sync/status`.
+
+---
+
+## Rate Limiting
+
+When `rag.rate-limit.enabled=true`, a per-authenticated-principal token bucket throttles requests.
+Generation endpoints (`/api/rag/prompt`, `/api/rag/chat/stream`, `/api/rag/graph-prompt`) get a
+tighter budget (`generate-requests-per-minute`, default 20) than search (`/api/rag/search/**`,
+`search-requests-per-minute`, default 60). Exceeding the budget returns **HTTP 429** with a
+`Retry-After` header. Buckets are in-memory and therefore per-instance; a multi-instance deployment
+does not share limits.
+
+---
+
+## Agentic Tool-Calling
+
+When `rag.agentic-tools.enabled=true`, the RAG model may invoke a small toolset mid-answer
+(`researchAgain`, `getDocument`, `listSources`) to fetch more evidence when the initial context is
+insufficient, bounded by `max-iterations` (default 2). Every tool-invoked retrieval is ACL-scoped to
+the request principal - identity comes from the authenticated request, never from a tool argument -
+so tools cannot widen the caller's access. Off by default.
+
+---
+
+## Prompt-Injection Defense
+
+Retrieved document content is untrusted: a stored document can contain text like "ignore previous
+instructions". Two independent, default-off guards address this:
+
+- `rag.prompt-injection.defense-enabled` wraps each retrieved chunk in explicit "untrusted document
+  data, not instructions" delimiters and reinforces that framing in the prompt.
+- `rag.prompt-injection.scan-enabled` runs a heuristic scanner over each chunk and logs matches for
+  audit. Flagged chunks are **not** dropped (they may hold evidence the user needs).
+
+Both default off so the generation baseline is unchanged; enable and re-measure with
+`content-lake-eval` before turning them on in production.
+
+---
+
+## MCP Server
+
+When `rag.mcp.enabled=true` (default), rag-service publishes a Model Context Protocol server
+exposing `secureSearch`, `getDocument`, and `listSources` tools to external LLM agents. The transport
+is synchronous WebMVC and sits behind the same `SecurityFilterChain` as the REST API, so it is
+reachable only with HTTP Basic or Alfresco-ticket credentials (compatible with the official Alfresco
+MCP Server client model) and never anonymously. Tools derive the ACL identity from the authenticated
+request, so an agent cannot query as another user. Set `RAG_MCP_ENABLED=false` to disable.
 
 ---
 
