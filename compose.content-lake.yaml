@@ -283,6 +283,46 @@ services:
     networks:
       - stack
 
+  filesystem-batch-ingester:
+    # Opt-in profile only: combine with a base stack that provides hxpr, e.g.
+    #   docker compose --profile alfresco --profile filesystem up -d
+    # Kept out of full/demo so those (which build from the default GitHub context) are unaffected
+    # until this module is on the default branch.
+    profiles: [filesystem]
+    image: content-lake-app/filesystem-batch-ingester:local
+    build:
+      context: .
+      dockerfile: dockerfiles/filesystem-batch-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
+    environment:
+      FILESYSTEM_ROOT_PATH: ${FILESYSTEM_ROOT_PATH:-/data/filesystem}
+      FILESYSTEM_SOURCE_ID: ${FILESYSTEM_SOURCE_ID:-filesystem}
+      # Empty = ingest all files; set e.g. "pdf,docx,txt,md,html" to restrict.
+      FILESYSTEM_INCLUDE_EXTENSIONS: ${FILESYSTEM_INCLUDE_EXTENSIONS:-}
+      HXPR_URL: http://hxpr-app:8080
+      HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
+      HXPR_TARGET_PATH: ${HXPR_FILESYSTEM_TARGET_PATH:-/filesystem-sync}
+      HXPR_IDP_TOKEN_URL: http://idp:8080/idp/connect/token
+      HXPR_IDP_CLIENT_ID: ${HXPR_IDP_CLIENT_ID}
+      HXPR_IDP_CLIENT_SECRET: ${HXPR_IDP_CLIENT_SECRET}
+      HXPR_IDP_USERNAME: ${HXPR_IDP_USERNAME}
+      HXPR_IDP_PASSWORD: ${HXPR_IDP_PASSWORD}
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+      SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
+      SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+    volumes:
+      # Mount the host directory to ingest (read-only). Override with FILESYSTEM_HOST_PATH.
+      - "${FILESYSTEM_HOST_PATH:-./filesystem-data}:/data/filesystem:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      hxpr-app:
+        condition: service_healthy
+    networks:
+      - stack
+
   nuxeo-live-ingester:
     profiles: [nuxeo, full, demo]
     image: content-lake-app/nuxeo-live-ingester:local

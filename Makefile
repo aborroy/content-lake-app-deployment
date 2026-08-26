@@ -6,6 +6,9 @@
 #   make up-nuxeo           Nuxeo + HXPR + RAG  (~14 services)
 #   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~23 services)
 #   make up-demo            Full + standalone demo UI at /  (~24 services)
+#   Filesystem connector (opt-in): add the 'filesystem' profile to a base stack, e.g.
+#     docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester
+#     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured)
 #   make down               Stop all services
 #   make logs               Follow logs
 #   make ps                 Show service status
