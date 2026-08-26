@@ -39,6 +39,12 @@ make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~23 services)
 make up-demo           # full + standalone demo UI at /  (~24 services)
 ```
 
+The `filesystem-batch-ingester` is an opt-in connector in its own `filesystem` profile (kept out of
+`full`/`demo` so those keep building from the default branch). Add it to any base stack that provides
+hxpr, e.g. `docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester`.
+It ingests a mounted directory (default `./filesystem-data`, override with `FILESYSTEM_HOST_PATH`) and
+stays idle until you trigger `POST /api/sync/configured`, so an empty directory is harmless.
+
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
 
 ```bash
@@ -63,7 +69,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, solr6\*, control-center\* |
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, idp, localstack, mockoon, router, rest, aio, opensearch-dashboards\*, dgraph-zero/dgraph-alpha (GraphRAG) |
-| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester |
+| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 
 Always run from the project root using `make` or `docker compose` -- the included files are not

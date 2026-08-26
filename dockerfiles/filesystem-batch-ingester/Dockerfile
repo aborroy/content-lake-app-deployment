@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Build context: this directory (dockerfiles/rag-service)
+# Build context: this directory (dockerfiles/filesystem-batch-ingester)
 # App source supplied via additional_context named "code" (CONTENT_LAKE_GIT_CONTEXT)
 FROM maven:3.9.11-eclipse-temurin-25-alpine AS build
 WORKDIR /workspace
@@ -21,14 +21,15 @@ COPY --from=code filesystem/pom.xml filesystem/pom.xml
 COPY --from=code filesystem/content-lake-source-filesystem/pom.xml filesystem/content-lake-source-filesystem/pom.xml
 COPY --from=code filesystem/filesystem-batch-ingester/pom.xml filesystem/filesystem-batch-ingester/pom.xml
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl common/rag-service -am dependency:go-offline
+    mvn -q -DskipTests -pl filesystem/filesystem-batch-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
 COPY --from=code common/content-lake-core/src common/content-lake-core/src
-COPY --from=code common/rag-service/src common/rag-service/src
+COPY --from=code filesystem/content-lake-source-filesystem/src filesystem/content-lake-source-filesystem/src
+COPY --from=code filesystem/filesystem-batch-ingester/src filesystem/filesystem-batch-ingester/src
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl common/rag-service -am package
+    mvn -q -DskipTests -pl filesystem/filesystem-batch-ingester -am package
 RUN mkdir -p /layers \
- && JAR="$(ls -1 common/rag-service/target/*.jar | grep -v 'original' | head -n 1)" \
+ && JAR="$(ls -1 filesystem/filesystem-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
 FROM eclipse-temurin:25-jre-alpine
@@ -40,8 +41,8 @@ COPY --from=build /layers/snapshot-dependencies/ ./
 COPY --from=build /layers/spring-boot-loader/ ./
 COPY --from=build /layers/application/ ./
 USER app
-EXPOSE 9091
+EXPOSE 9095
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO- http://localhost:9091/actuator/health || exit 1
+  CMD wget -qO- http://localhost:9095/actuator/health || exit 1
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
 ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]

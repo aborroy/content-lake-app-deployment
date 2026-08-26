@@ -17,6 +17,9 @@ COPY --from=code alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-
 COPY --from=code nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
 COPY --from=code nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
 COPY --from=code nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
+COPY --from=code filesystem/pom.xml filesystem/pom.xml
+COPY --from=code filesystem/content-lake-source-filesystem/pom.xml filesystem/content-lake-source-filesystem/pom.xml
+COPY --from=code filesystem/filesystem-batch-ingester/pom.xml filesystem/filesystem-batch-ingester/pom.xml
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -DskipTests -pl nuxeo/nuxeo-batch-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
