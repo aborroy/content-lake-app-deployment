@@ -20,7 +20,50 @@ The following Alfresco-side components are required for Content Lake to function
   image is built locally from `acs/alfresco/`.
 - **ActiveMQ** configured for Alfresco Event2 so `live-ingester` can consume `alfresco.repo.event2`
 - **Alfresco Transform Core AIO** for text extraction during ingestion
-- **Alfresco Search Services / Solr** wired with `secureComms=secret`
+- **Alfresco repository search** on OpenSearch (the `elasticsearch` index subsystem), fed by the
+  `batch-indexer` service -- see [Search: OpenSearch](#search-opensearch-alfresco-search-community)
+
+---
+
+## Search: OpenSearch (Alfresco Search Community)
+
+As of ACS Community 26.2 the repository is indexed by the OpenSearch-based **Alfresco Search
+Community** module instead of Solr. The repository search subsystem points at the same
+`opensearch` cluster that hxpr uses (declared in `compose.hxpr.yaml`); the two run as independent
+indices in one cluster with no cross-index reads:
+
+| Index | Owner | Purpose |
+|---|---|---|
+| `alfresco*` (`alfresco`, `alfresco-reindex-state`, `alfresco-reindex-dead-letter`) | Alfresco repository | Metadata + content search (AFTS) |
+| `nuxeo_embeddings*` | hxpr | Semantic / vector search |
+
+Wiring in `compose.alfresco.yaml`:
+
+- The `alfresco` repository runs with `-Dindex.subsystem.name=elasticsearch`,
+  `-Delasticsearch.host=opensearch`, `-Delasticsearch.port=9200`,
+  `-Delasticsearch.createIndexIfNotExists=true`, and keeps `-Dsolr.secureComms=secret`
+  plus `-Dsolr.sharedSecret=${SHARED_SECRET}` (the repo-side transform secure-comms knobs).
+- The `batch-indexer` service (`alfresco/alfresco-elasticsearch-batch-indexing`) runs in
+  continuous-polling mode. The interval is tuned down to `2s`
+  (`ALFRESCO_REINDEX_CONTINUOUS_POLLINGINTERVAL`, override with `SEARCH_INDEXER_POLLINGINTERVAL`)
+  vs the 15s production default so new content is AFTS-searchable within a couple of seconds. Its
+  `ALFRESCO_CONTENT_TRANSFORM_SHAREDSECRET` **must match** the repository's `solr.sharedSecret`
+  -- both are set to `${SHARED_SECRET}`.
+
+This is a clean-deploy design: on a fresh stack the indexer starts at "now" and indexes content
+created while it runs -- no migration or reindex-from-Solr, no cursor seeding. The archive/trashcan
+search scope (`alfresco-archive`) is **not** implemented by the OpenSearch module.
+
+> OpenSearch `3.5.0` is above Alfresco's documented support matrix (OpenSearch 2.11.1 / ES 8.17.x).
+> It is used here for the dev/demo stack only; production should pin a supported version or run
+> separate clusters.
+
+Validate that both indices coexist once the stack is healthy:
+
+```bash
+docker compose exec opensearch curl -s http://localhost:9200/_cat/indices
+# expect: alfresco, alfresco-reindex-state, alfresco-reindex-dead-letter, nuxeo_embeddings*
+```
 
 ---
 

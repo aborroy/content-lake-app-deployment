@@ -67,7 +67,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 | File | Contents |
 |---|---|
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
-| [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, solr6\*, control-center\* |
+| [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, idp, localstack, mockoon, router, rest, aio, opensearch-dashboards\*, dgraph-zero/dgraph-alpha (GraphRAG) |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
@@ -106,7 +106,7 @@ flowchart LR
   subgraph ACS["Alfresco"]
     Alfresco["alfresco"]
     ControlCenter["control-center"]
-    Solr["solr6"]
+    BatchIndexer["batch-indexer"]
     Postgres["postgres"]
     ActiveMQ["activemq"]
     Transform["transform-core-aio"]
@@ -143,10 +143,13 @@ flowchart LR
 
   ControlCenter --> Alfresco
   Alfresco --> Postgres
-  Alfresco --> Solr
+  Alfresco --> OpenSearch
   Alfresco --> ActiveMQ
   Alfresco --> Transform
-  Solr --> Alfresco
+  BatchIndexer --> Alfresco
+  BatchIndexer --> Postgres
+  BatchIndexer --> Transform
+  BatchIndexer --> OpenSearch
 
   OSD --> OpenSearch
 
@@ -208,6 +211,10 @@ Notes:
 - In `nuxeo` profile, `/` redirects to `/nuxeo/`.
 - The Nuxeo routes are active in `nuxeo`, `full`, and `demo` profiles, and require `../nuxeo-deployment` to be running.
 - `opensearch-dashboards` is published separately on port `5601`, not through `proxy`.
+- Alfresco and hxpr share the single `opensearch` cluster as two independent indices: `alfresco*`
+  (repository search, fed by `batch-indexer`) and `nuxeo_embeddings*` (hxpr semantic search). There
+  are no cross-index reads. On a clean deploy the batch indexer starts at "now" and indexes content
+  created while it runs; the archive/trashcan search scope is not supported by the OpenSearch module.
 - Docker Model Runner is an external dependency used by the Content Lake services, not a Compose service in this repository.
 
 ## What Had To Stay From The Alfresco Side
@@ -217,8 +224,9 @@ Before redesigning the deployment, the non-negotiable Alfresco-side requirements
 - Alfresco Repository with the `content-lake-repo-model` module so `cl:indexed` and `cl:excludeFromLake` exist.
 - ActiveMQ configured for Alfresco Event2 so `live-ingester` can consume `alfresco.repo.event2`.
 - Alfresco Transform Core AIO for text extraction during ingestion.
-- Alfresco Search Services / Solr wired with `secureComms=secret`.
-- A reverse proxy exposing `/`, `/alfresco/`, `/admin/`, `/api-explorer/`, `/api/rag/`, and `/solr/`.
+- Alfresco repository search wired to OpenSearch (the `elasticsearch` index subsystem), fed by the
+  `batch-indexer` service (Alfresco Search Community, ACS 26.2+), with `secureComms=secret`.
+- A reverse proxy exposing `/`, `/alfresco/`, `/admin/`, `/api-explorer/`, and `/api/rag/`.
 
 This repo vendors the required ACS module/config pieces locally and builds the rest of the stack around them.
 

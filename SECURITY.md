@@ -36,7 +36,7 @@ other than localhost:
 | `ALFRESCO_ADMIN_PASSWORD` | `admin` | Strong password |
 | `POSTGRES_PASSWORD` | `alfresco` | Strong password |
 | `ACTIVEMQ_PASSWORD` | `admin` | Strong password |
-| `SOLR_SECRET` | `3uux2z0blli` | Random string |
+| `SHARED_SECRET` | `3uux2z0blli` | Random string (repo <-> batch-indexer transform secure comms) |
 | `OPENSEARCH_ADMIN_PASSWORD` | `Hyland_Pass1!` | Strong password (required if security re-enabled) |
 | `HXPR_IDP_CLIENT_SECRET` | `secret` | Strong secret |
 | `HXPR_IDP_PASSWORD` | `password` | Strong password |

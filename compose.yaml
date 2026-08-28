@@ -8,7 +8,6 @@ networks:
 volumes:
   alf-repo-data:
   postgres-data:
-  solr-data:
   mongodb-data:
   opensearch-data:
   localstack-data:

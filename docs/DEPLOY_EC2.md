@@ -353,7 +353,7 @@ flowchart LR
   subgraph ACS["Alfresco"]
     Alfresco["alfresco"]
     ControlCenter["control-center"]
-    Solr["solr6"]
+    BatchIndexer["batch-indexer"]
     Postgres["postgres"]
     ActiveMQ["activemq"]
     Transform["transform-core-aio"]
@@ -393,10 +393,13 @@ flowchart LR
 
   ControlCenter --> Alfresco
   Alfresco --> Postgres
-  Alfresco --> Solr
+  Alfresco --> OpenSearch
   Alfresco --> ActiveMQ
   Alfresco --> Transform
-  Solr --> Alfresco
+  BatchIndexer --> Alfresco
+  BatchIndexer --> Postgres
+  BatchIndexer --> Transform
+  BatchIndexer --> OpenSearch
 
   OSD --> OpenSearch
 
@@ -511,7 +514,7 @@ docker compose -f compose.ai.yaml ps       # status
 ## 20. Saving Costs
 
 - Stop the EC2 instance when not in use; you are only charged for storage while stopped (~$0.10/GB/month for gp3).
-- EBS volumes persist across stops, so Alfresco data, Solr index, MongoDB, and cached model weights in `/opt/models` are all retained.
+- EBS volumes persist across stops, so Alfresco data, the OpenSearch indices, MongoDB, and cached model weights in `/opt/models` are all retained.
 
 ## 21. Downgrading to a Smaller LLM
 
