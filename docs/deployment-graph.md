@@ -39,6 +39,24 @@ API feature flag defaults to on (`HXPR_GRAPH_API_FEATURE=true`); set it to `fals
 Because provisioning creates the graphDB in Dgraph, always start from clean volumes for a first run
 (`make clean`), consistent with the rest of the stack.
 
+### Entity extraction (asynchronous)
+
+Entity extraction runs off the ingest hot path: each ingester submits the extraction LLM call to a
+bounded background executor and returns immediately, so document ingestion latency is not dominated
+by extraction. Graph population is therefore **eventually consistent** - a document is searchable
+(vector/keyword) as soon as it is ingested, and its `GlobalEntity` nodes and `has_global_entity`
+edges appear shortly after. Controls (bound on every ingester via relaxed binding, defaults shown):
+
+```bash
+HXPR_GRAPH_EXTRACTION_ASYNC=true            # false runs extraction inline on the ingest thread
+HXPR_GRAPH_EXTRACTION_WORKER_THREADS=2      # background extraction workers
+HXPR_GRAPH_EXTRACTION_QUEUE_CAPACITY=500    # on saturation, the ingest thread runs it inline (backpressure)
+```
+
+Note for the eval harness: because extraction no longer blocks ingestion, `cleval ingest` verifies
+embeddings without waiting on entity extraction; allow a short delay after ingestion before relying
+on `graphSources` in `/api/rag/graph-prompt`.
+
 ## Verifying
 
 Provisioning logs (idempotent - "Found existing ..." on subsequent runs):
