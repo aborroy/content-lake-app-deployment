@@ -182,6 +182,30 @@ Accept: text/event-stream
 }
 ```
 
+### Feedback (answer rating)
+
+```http
+POST /api/rag/feedback
+Authorization: Basic <base64(user:password)>
+Content-Type: application/json
+
+{
+  "requestId": "the requestId echoed by /api/rag/prompt",
+  "rating": "down",
+  "comment": "optional note",
+  "question": "the original question (echoed for corpus building)",
+  "answer": "the rated answer (optional)",
+  "sourceNodeIds": ["node-a", "node-b"]
+}
+```
+
+Persists a rating for a generated answer as an hxpr document under `RAG_FEEDBACK_BASE_PATH`
+(default `/_feedback`), returning `{ "stored": true, "feedbackId": "..." }`. Every `/api/rag/prompt`
+and streaming `metadata` response carries a `requestId` used to correlate the feedback with the
+answer. `GET /api/rag/feedback?rating=down&limit=200` lists stored feedback for the offline
+evaluation harness (`cleval feedback import`). Enabled by default; set `RAG_FEEDBACK_ENABLED=false`
+to disable the endpoint. Both verbs require authentication like the other `/api/rag/**` endpoints.
+
 ### Evaluation smoke check (opt-in)
 
 ```http
@@ -214,6 +238,14 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
 - Graph-augmented retrieval: `RAG_GRAPH_ENABLED` turns on the rag-service `/api/rag/graph-prompt`
   endpoint and graph expansion; the graph backend and provisioning are covered in
   [deployment-graph.md](deployment-graph.md).
+- Semantic query caching: `RAG_CACHE_ENABLED` (default off) turns on a bounded, short-TTL in-memory
+  cache of query embeddings and full retrieval results (`RAG_CACHE_TTL_SECONDS` default 60,
+  `RAG_CACHE_MAX_SIZE` default 1000). Result-cache entries are scoped by the authenticated principal,
+  so a cached answer is never served across ACL contexts; the TTL bounds how stale a principal's
+  group membership may be. Hit-rate is exposed as `cache.gets{cache=rag.query.results}` /
+  `{cache=rag.query.embeddings}` under `/actuator/metrics`.
+- User feedback capture: `RAG_FEEDBACK_ENABLED` (default **on**) exposes `POST/GET /api/rag/feedback`;
+  `RAG_FEEDBACK_BASE_PATH` (default `/_feedback`) is the hxpr folder feedback is stored under.
 
 ### Health check (public)
 
@@ -334,3 +366,22 @@ Metrics are exposed via Micrometer at `/actuator/prometheus`. Key metrics:
 
 Health: `/actuator/health` (public, no auth required).
 Info: `/actuator/info` (public).
+
+### Distributed tracing
+
+The pipeline is instrumented with Micrometer Tracing (OpenTelemetry bridge). Named spans cover the
+key steps -- `rag.embed.query`, `rag.search.vector`, `rag.search.keyword`, and `rag.generate` -- so a
+single request shows which embedding, hxpr query, or LLM call inside a phase was the bottleneck,
+beyond the coarse `searchTimeMs`/`generationTimeMs`/`totalTimeMs` fields on the prompt response.
+Trace and span ids are added to every log line via the MDC (`[rag-service,<traceId>,<spanId>]`).
+
+- `MANAGEMENT_TRACING_SAMPLING_PROBABILITY` -- sampling rate (default `0.1`; set `1.0` in dev).
+- `MANAGEMENT_OTLP_TRACING_ENDPOINT` -- OTLP `/v1/traces` collector URL. **Blank by default**, so
+  spans are created and logged but nothing is exported and no collector is required. Point it at a
+  collector (e.g. `http://otel-collector:4318/v1/traces`) to ship traces.
+
+### Cache metrics
+
+When `RAG_CACHE_ENABLED=true`, the two Caffeine caches are bound to Micrometer and visible under
+`/actuator/metrics`: `cache.gets{cache=rag.query.results,result=hit|miss}` and
+`cache.gets{cache=rag.query.embeddings,...}`, plus `cache.size` / `cache.evictions`.

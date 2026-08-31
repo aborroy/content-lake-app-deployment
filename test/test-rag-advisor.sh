@@ -243,6 +243,40 @@ else
   fail "F3: expected no-context sentinel model, got '$fb_model'"
 fi
 
+# -- G - User feedback capture (#74) -----------------------------------------
+section "G - User feedback capture (/api/rag/feedback)"
+# Every /prompt answer carries a requestId used to correlate feedback back to the answer.
+req_id=$(printf '%s' "$PROMPT_RESP" | jq -r '.requestId // empty' 2>/dev/null || echo "")
+[ -n "$req_id" ] && pass "G1: /prompt response carries a requestId ($req_id)" \
+                 || fail "G1: /prompt response missing requestId"
+
+# Submit a down-rating for that answer; the endpoint must store it and echo stored=true.
+FB_BODY="{\"requestId\":$(json_escape "$req_id"),\"rating\":\"down\",\"comment\":\"e2e smoke ${TEST_RUN_TAG}\",\"question\":$(json_escape "What does the $SENTINEL document say about the advisor pipeline?")}"
+FB_RESP=$(curl $CURL_TLS -sf -m 30 -u "$ALF_AUTH" -X POST "$RAG_URL/feedback" \
+  -H 'Content-Type: application/json' -d "$FB_BODY" 2>/dev/null || echo '{}')
+fb_stored=$(printf '%s' "$FB_RESP" | jq -r '.stored // false' 2>/dev/null || echo false)
+[ "$fb_stored" = "true" ] && pass "G2: POST /feedback stored the rating" \
+                          || fail "G2: POST /feedback did not store the rating (resp: $FB_RESP)"
+
+# Feedback must never be accepted anonymously (same auth contract as the other RAG endpoints).
+anon_code=$(curl $CURL_TLS -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/feedback" \
+  -H 'Content-Type: application/json' -d "$FB_BODY" 2>/dev/null || echo 000)
+[ "$anon_code" = "401" ] && pass "G3: unauthenticated POST /feedback is rejected (401)" \
+                         || fail "G3: expected 401 for anonymous /feedback, got HTTP $anon_code"
+
+# The listing endpoint (consumed by 'cleval feedback import') returns the down-rated entries.
+# The feedback doc is created in hxpr and then queried back; that create->queryable step has an
+# indexing lag, so poll for up to ~40s rather than reading immediately.
+list_has=0
+for _ in $(seq 1 20); do
+  LIST_RESP=$(curl $CURL_TLS -sf -m 30 -u "$ALF_AUTH" "$RAG_URL/feedback?rating=down&limit=200" 2>/dev/null || echo '[]')
+  list_has=$(printf '%s' "$LIST_RESP" | jq -r --arg r "$req_id" 'map(select(.requestId == $r)) | length' 2>/dev/null || echo 0)
+  [ "${list_has:-0}" -gt 0 ] && break
+  sleep 2
+done
+[ "${list_has:-0}" -gt 0 ] && pass "G4: GET /feedback lists the submitted down-rating" \
+                           || fail "G4: GET /feedback did not include requestId $req_id within 40s"
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 section "Summary"
 printf "Passed: %d | Failed: %d\n" "$PASS" "$FAIL"
