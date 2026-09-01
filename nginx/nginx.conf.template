@@ -103,6 +103,7 @@ http {
         # Operational status snapshot (rag-service, authenticated).
         location /api/status {
             proxy_pass http://$rag_service_upstream;
+            proxy_hide_header WWW-Authenticate;
         }
 
         # MCP server endpoint (rag-service). Authenticated like every other rag route; SSE-friendly.
@@ -237,6 +238,7 @@ http {
         # Operational status snapshot (rag-service, authenticated).
         location /api/status {
             proxy_pass http://$rag_service_upstream;
+            proxy_hide_header WWW-Authenticate;
         }
 
         # MCP server endpoint (rag-service). Authenticated like every other rag route; SSE-friendly.
