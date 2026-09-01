@@ -60,7 +60,7 @@ help: ## Show this help
 local: ## Placeholder target for 'local' parameter — use: make up-demo local
 	@:
 
-up-alfresco: ## Alfresco source -- core services (~21)
+up-alfresco: ## Alfresco source -- core services (~17)
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui)..."
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \

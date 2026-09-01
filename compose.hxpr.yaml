@@ -4,20 +4,6 @@
 
 services:
 
-  idp:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: ghcr.io/hylandexperience/hxp/iam/api.mock:${IDP_TAG:-26.35.14}
-    hostname: idp
-    environment:
-      - IdpConfiguration__Host__IssuerUri=http://idp:8080/idp
-      - IdpConfiguration__Host__ValidIssuers__0=http://idp:8080/idp
-      - IdpConfiguration__Host__PublicOrigin=http://idp:8080
-      - IdpConfiguration__Host__RequireHttps=false
-    volumes:
-      - ./hxpr/idp/identity-resources.json:/app/seeddata/local/web.seeddata.json:ro
-    networks:
-      - stack
-
   mongodb:
     profiles: [alfresco, nuxeo, full, demo]
     image: mongo:${MONGODB_TAG:-8.2.5}
@@ -166,56 +152,6 @@ services:
     networks:
       - stack
 
-  aio:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: ghcr.io/hylandsoftware/hxp-transform-aio:${HXTS_TAG:-3.0.566}
-    environment:
-      SFS_URL: http://rest:8098/private/file
-      AIO_URL: http://aio:8090
-      AWS_SQS_ENDPOINT: http://localstack:4566
-      AWS_SNS_ENDPOINT: http://localstack:4566
-      SPRING_PROFILES_ACTIVE: default,local
-    volumes:
-      - shared-file-store:/tmp/filestore
-    networks:
-      - stack
-
-  router:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: ghcr.io/hylandsoftware/hxp-transform-router:${HXTS_TAG:-3.0.566}
-    environment:
-      SFS_URL: http://rest:8098/private/file
-      AIO_URL: http://aio:8090
-      AWS_SQS_ENDPOINT: http://localstack:4566
-      AWS_SNS_ENDPOINT: http://localstack:4566
-      SPRING_PROFILES_ACTIVE: default,local
-    volumes:
-      - shared-file-store:/tmp/filestore
-    networks:
-      - stack
-
-  rest:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: ghcr.io/hylandsoftware/hxp-transform-rest:${HXTS_TAG:-3.0.566}
-    environment:
-      REST_AUTHENTICATED: "false"
-      ROUTER_URL: http://router:8095
-      IDP_URL: http://idp:8080
-      SFS_SHARE_EFS: "true"
-      ENV_ID: localenv
-      HXTS_REPLY_TO: hxts_rest
-      QUEUE_AUTO_CREATE: "true"
-      AWS_SQS_ENDPOINT: http://localstack:4566
-      AWS_SNS_ENDPOINT: http://localstack:4566
-      SPRING_PROFILES_ACTIVE: default,local
-    volumes:
-      - shared-file-store:/tmp/filestore
-    depends_on:
-      - router
-      - localstack
-    networks:
-      - stack
-
   hxpr-app:
     profiles: [alfresco, nuxeo, full, demo]
     image: "${HXPR_LOCAL_IMAGE:-content-lake-app/hxpr-app:local}"
@@ -224,8 +160,8 @@ services:
       context: .
       dockerfile: ./hxpr/Dockerfile
       args:
-        HXPR_GIT_URL: ${HXPR_GIT_URL:-https://github.com/HylandSoftware/hxpr.git}
-        HXPR_GIT_REF: ${HXPR_GIT_REF:-master}
+        HXPR_GIT_URL: ${HXPR_GIT_URL:-https://github.com/Hyland/ai-ready-index.git}
+        HXPR_GIT_REF: ${HXPR_GIT_REF:-main}
         HXPR_GIT_SHA: ${HXPR_GIT_SHA:-}
       secrets:
         - source: hxpr_git_auth_token
@@ -261,10 +197,7 @@ services:
         -Dontology.s3.bucket=ontology-bucket-1
       NUXEO_MONGODB_SERVER: mongodb:27017
       OPENSEARCH_ADDRESSLIST: http://opensearch:9200
-      IDP_URL: http://idp:8080
       NUCLEUS_URL: http://mockoon:3002
-      ROUTER_URL: http://router:8095
-      SFS_URL: http://rest:8098/private/file
       ENV_ID: localenv
       HXTS_REPLY_TO: localapp
       NUXEO_AWS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
@@ -285,8 +218,6 @@ services:
         condition: service_completed_successfully
       localstack:
         condition: service_healthy
-      idp:
-        condition: service_started
       mockoon:
         condition: service_healthy
       dgraph-alpha:

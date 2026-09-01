@@ -1,7 +1,7 @@
 FROM maven:3-eclipse-temurin-25-alpine AS build
 
-ARG HXPR_GIT_URL=https://github.com/HylandSoftware/hxpr.git
-ARG HXPR_GIT_REF=master
+ARG HXPR_GIT_URL=https://github.com/Hyland/ai-ready-index.git
+ARG HXPR_GIT_REF=main
 # Optional: pin to a specific commit SHA for reproducible builds.
 # When set, the clone is done without --depth 1 so the SHA can be checked out.
 ARG HXPR_GIT_SHA=
@@ -34,22 +34,20 @@ SCRIPT
 
 WORKDIR /workspace/hxpr
 
-# HXPR needs both GitHub Packages and Hyland Nexus credentials.
+# ai-ready-index still declares the hylandsoftware-releases Nexus repo, so the Maven build may need
+# GitHub Packages / Nexus credentials. Export them only when the secrets are present; a public/
+# anonymous build proceeds without them and Maven fails on its own if a private artifact is required.
 RUN --mount=type=cache,target=/root/.m2/repository \
-    --mount=type=secret,id=maven_username \
-    --mount=type=secret,id=maven_password \
-    --mount=type=secret,id=nexus_username \
-    --mount=type=secret,id=nexus_password <<'SCRIPT'
+    --mount=type=secret,id=maven_username,required=false \
+    --mount=type=secret,id=maven_password,required=false \
+    --mount=type=secret,id=nexus_username,required=false \
+    --mount=type=secret,id=nexus_password,required=false <<'SCRIPT'
 set -e
-test -s /run/secrets/maven_username || { echo "Missing MAVEN_USERNAME secret" >&2; exit 1; }
-test -s /run/secrets/maven_password || { echo "Missing MAVEN_PASSWORD secret" >&2; exit 1; }
-test -s /run/secrets/nexus_username || { echo "Missing NEXUS_USERNAME secret" >&2; exit 1; }
-test -s /run/secrets/nexus_password || { echo "Missing NEXUS_PASSWORD secret" >&2; exit 1; }
-export MAVEN_USERNAME="$(cat /run/secrets/maven_username)"
-export MAVEN_PASSWORD="$(cat /run/secrets/maven_password)"
-export NEXUS_USERNAME="$(cat /run/secrets/nexus_username)"
-export NEXUS_PASSWORD="$(cat /run/secrets/nexus_password)"
-mvn --no-transfer-progress -nsu -pl server/hxpr-app -am package -DskipTests
+[ -s /run/secrets/maven_username ] && export MAVEN_USERNAME="$(cat /run/secrets/maven_username)"
+[ -s /run/secrets/maven_password ] && export MAVEN_PASSWORD="$(cat /run/secrets/maven_password)"
+[ -s /run/secrets/nexus_username ] && export NEXUS_USERNAME="$(cat /run/secrets/nexus_username)"
+[ -s /run/secrets/nexus_password ] && export NEXUS_PASSWORD="$(cat /run/secrets/nexus_password)"
+mvn --no-transfer-progress -nsu -pl server/hxpr-community-internal-app -am package -DskipTests
 SCRIPT
 
 FROM ghcr.io/hylandsoftware/corretto-sambuca-25:20260306@sha256:34fc8ddd10d51da8b38192e405c1c570e2d7130f98e134c368a6553a7759fbed
@@ -66,7 +64,7 @@ ENV JAVA_OPTIONS=""
 RUN mkdir /deployments \
     && curl https://repo1.maven.org/maven2/io/fabric8/run-java-sh/${RUN_JAVA_VERSION}/run-java-sh-${RUN_JAVA_VERSION}-sh.sh -o /deployments/run-java.sh
 
-COPY --from=build /workspace/hxpr/server/hxpr-app/target/hxpr-app-*.jar /deployments/
+COPY --from=build /workspace/hxpr/server/hxpr-community-internal-app/target/hxpr-community-internal-app-*.jar /deployments/
 
 RUN addgroup -g ${GROUP_ID} ${GROUP_NAME} && \
     adduser -D -u ${USER_ID} -G ${GROUP_NAME} ${USER_NAME} && \

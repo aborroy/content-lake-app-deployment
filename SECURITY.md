@@ -38,8 +38,7 @@ other than localhost:
 | `ACTIVEMQ_PASSWORD` | `admin` | Strong password |
 | `SHARED_SECRET` | `3uux2z0blli` | Random string (repo <-> batch-indexer transform secure comms) |
 | `OPENSEARCH_ADMIN_PASSWORD` | `Hyland_Pass1!` | Strong password (required if security re-enabled) |
-| `HXPR_IDP_CLIENT_SECRET` | `secret` | Strong secret |
-| `HXPR_IDP_PASSWORD` | `password` | Strong password |
+| `HXPR_PASSWORD` | `password` | Strong password (engine HTTP Basic auth) |
 | `NUXEO_PASSWORD` | `Administrator` | Strong password |
 | `SERVER_NAME` | `localhost` | Public hostname or IP |
 | `USE_HTTPS` | `false` | `true` + valid certificate |

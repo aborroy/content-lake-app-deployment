@@ -8,7 +8,7 @@ Self-contained deployment for Content Lake App -- ingests content from Alfresco 
 
 ## Content Lake Ecosystem
 
-Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into [hxpr](https://github.com/HylandSoftware/hxpr) for hybrid semantic search and RAG.
+Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into the [ai-ready-index](https://github.com/Hyland/ai-ready-index) engine for hybrid semantic search and RAG.
 
 | Repo | Role |
 |---|---|
@@ -33,10 +33,10 @@ The setup script handles everything for a first run. For manual control see [Fir
 The stack supports four source profiles. Start with `alfresco` if you only have Alfresco:
 
 ```bash
-make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~21 services)
-make up-nuxeo          # Nuxeo + HXPR + RAG  (~14 services)
-make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~23 services)
-make up-demo           # full + standalone demo UI at /  (~24 services)
+make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~17 services)
+make up-nuxeo          # Nuxeo + HXPR + RAG  (~10 services)
+make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~19 services)
+make up-demo           # full + standalone demo UI at /  (~20 services)
 ```
 
 The `filesystem-batch-ingester` is an opt-in connector in its own `filesystem` profile (kept out of
@@ -68,7 +68,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 |---|---|
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
-| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, idp, localstack, mockoon, router, rest, aio, opensearch-dashboards\*, dgraph-zero/dgraph-alpha (GraphRAG) |
+| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, localstack, mockoon, opensearch-dashboards\*, dgraph-zero/dgraph-alpha (GraphRAG) |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 
@@ -122,12 +122,8 @@ flowchart LR
     Mongo["mongodb"]
     OpenSearch["opensearch"]
     OSD["opensearch-dashboards"]
-    Idp["idp"]
     Localstack["localstack"]
     Mockoon["mockoon"]
-    Aio["aio"]
-    Router["router"]
-    Rest["rest"]
   end
 
   Browser --> Proxy
@@ -158,48 +154,33 @@ flowchart LR
   Batch --> ActiveMQ
   Batch --> Alfresco
   Batch --> Transform
-  Batch --> Idp
   Batch --> HxprApp
   Batch -.-> ModelRunner
 
   Live --> ActiveMQ
   Live --> Alfresco
   Live --> Transform
-  Live --> Idp
   Live --> HxprApp
   Live -.-> ModelRunner
 
   NuxeoBatch --> Nuxeo
-  NuxeoBatch --> Idp
   NuxeoBatch --> HxprApp
   NuxeoBatch -.-> ModelRunner
 
   NuxeoLive --> Nuxeo
-  NuxeoLive --> Idp
   NuxeoLive --> HxprApp
   NuxeoLive -.-> ModelRunner
 
   Rag --> Alfresco
   Rag --> Nuxeo
-  Rag --> Idp
   Rag --> HxprApp
   Rag -.-> ModelRunner
 
   HxprApp --> Mongo
   HxprApp --> OpenSearch
-  HxprApp --> Idp
   HxprApp --> Localstack
   HxprApp --> Mockoon
-  HxprApp --> Router
-  HxprApp --> Rest
 
-  Router --> Aio
-  Router --> Localstack
-  Rest --> Router
-  Rest --> Localstack
-  Rest --> Idp
-  Aio --> Rest
-  Aio --> Localstack
 ```
 
 Notes:
@@ -251,7 +232,7 @@ Quick Start).
 | `content-lake-app` | `github.com/aborroy/content-lake-app#main` | `CONTENT_LAKE_GIT_CONTEXT=../content-lake-app` |
 | `alfresco-content-lake-ui` | `github.com/aborroy/alfresco-content-lake-ui#main` | `CONTENT_LAKE_UI_GIT_CONTEXT=../alfresco-content-lake-ui` |
 | `content-lake-app-ui` | `github.com/aborroy/content-lake-app-ui#main` | `CONTENT_LAKE_APP_UI_CONTEXT=../content-lake-app-ui` |
-| `hxpr` | `github.com/HylandSoftware/hxpr` (branch from `HXPR_GIT_REF`) | `HXPR_LOCAL_IMAGE=<local-tag>` |
+| `hxpr` | `github.com/Hyland/ai-ready-index` (branch from `HXPR_GIT_REF`) | `HXPR_LOCAL_IMAGE=<local-tag>` |
 | `nuxeo-deployment` | sibling directory `../nuxeo-deployment` (required for Nuxeo profiles) | -- |
 
 To build everything from local source (useful during active development):
@@ -268,27 +249,23 @@ The `local` parameter sets all four `*_CONTEXT` overrides automatically and forc
 - Docker Model Runner -- enable in Docker Desktop settings, or install `docker-model-plugin` on Linux
 - Access to `ghcr.io` for Hyland images
 - Outbound access to GitHub so BuildKit can fetch the remote source contexts
-- HXPR build credentials: `MAVEN_USERNAME`, `MAVEN_PASSWORD`, `NEXUS_USERNAME`, `NEXUS_PASSWORD`
-- `HXPR_GIT_AUTH_TOKEN` if the HXPR repository cannot be cloned anonymously
+- `HXPR_GIT_AUTH_TOKEN` while `Hyland/ai-ready-index` is private (needed for the source clone)
+- Optional `MAVEN_USERNAME`/`MAVEN_PASSWORD`/`NEXUS_USERNAME`/`NEXUS_PASSWORD` only if the engine
+  build resolves a private artifact from the `hylandsoftware-releases` Nexus repo
 
 ## Getting Credentials
 
-The HXPR build uses two authenticated artifact sources:
+The engine is built from `Hyland/ai-ready-index`. That repository is currently private, so a source
+clone needs a GitHub token; the Maven build otherwise resolves from public repositories.
 
-- GitHub Packages: `https://maven.pkg.github.com/HylandSoftware/hxp-transform-service`
-- Hyland Nexus releases: `https://artifacts.alfresco.com/nexus/content/repositories/hylandsoftware-releases`
+**`HXPR_GIT_AUTH_TOKEN`** -- required while `https://github.com/Hyland/ai-ready-index.git` is private.
+Use a GitHub classic token with `repo` scope, or a fine-grained token scoped to `Hyland/ai-ready-index`
+with read access to repository contents.
 
-**`MAVEN_USERNAME`** -- your GitHub username.
-
-**`MAVEN_PASSWORD`** -- a GitHub personal access token from [GitHub token settings](https://github.com/settings/tokens).
-Use a classic token from [Generate new token (classic)](https://github.com/settings/tokens/new) with at least `read:packages`.
-If the Hyland package is private in your organisation, your account must have read access to that package, and you may need to authorise the token for SSO.
-
-**`NEXUS_USERNAME` / `NEXUS_PASSWORD`** -- credentials for your account on [Hyland Nexus](https://artifacts.alfresco.com/nexus/).
-If you do not already have access, request it from the Hyland/Alfresco team that provided your HXPR build access.
-
-**`HXPR_GIT_AUTH_TOKEN`** -- only needed if `https://github.com/HylandSoftware/hxpr.git` is not cloneable anonymously.
-Use a GitHub classic token with `repo` scope, or a fine-grained token scoped to `HylandSoftware/hxpr` with read access to repository contents.
+**`MAVEN_USERNAME` / `MAVEN_PASSWORD` / `NEXUS_USERNAME` / `NEXUS_PASSWORD`** -- optional. Only set
+them if the build fails resolving a private artifact from the `hylandsoftware-releases` Nexus repo
+(`https://artifacts.alfresco.com/nexus/content/repositories/hylandsoftware-releases`). When unset,
+the build proceeds anonymously.
 
 ## First Run
 
@@ -393,8 +370,8 @@ Key overrides:
 
 | Variable | Default | Description |
 |---|---|---|
-| `HXPR_GIT_URL` | `https://github.com/HylandSoftware/hxpr.git` | HXPR source repo |
-| `HXPR_GIT_REF` | `master` | Branch or tag to build |
+| `HXPR_GIT_URL` | `https://github.com/Hyland/ai-ready-index.git` | Engine source repo |
+| `HXPR_GIT_REF` | `main` | Branch or tag to build |
 | `HXPR_GIT_SHA` | *(empty)* | Pin to a specific commit SHA for reproducible builds |
 | `HXPR_LOCAL_IMAGE` | `content-lake-app/hxpr-app:local` | Local image tag for the built HXPR app |
 | `CONTENT_LAKE_GIT_CONTEXT` | `https://github.com/aborroy/content-lake-app.git#main` | Java source context |
@@ -510,8 +487,9 @@ See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running
 
 ## Notes
 
-- The HXPR app is built from source during `docker compose up --build` using `HXPR_GIT_REF` (default: `master`).
-- HXPR source build requires both GitHub Packages credentials and Hyland Nexus credentials, passed as Compose build secrets sourced from environment variables.
+- The engine is built from source (`Hyland/ai-ready-index`) during `docker compose up --build` using `HXPR_GIT_REF` (default: `main`).
+- The source clone needs `HXPR_GIT_AUTH_TOKEN` while the repo is private; the Maven build otherwise resolves from public repositories (Nexus/GitHub-Packages credentials are optional build secrets, used only if a private artifact is required).
+- content-lake-app authenticates to the engine with HTTP Basic (`HXPR_USERNAME` / `HXPR_PASSWORD`).
 - All Content Lake Java services (`batch-ingester`, `live-ingester`, ingesters, `rag-service`) build from source fetched directly from GitHub -- no local Java checkout needed.
 - The repository model is injected directly into the Alfresco image from this repo.
 - The ACA UI is exposed at `/aca/` in every profile where it is enabled, so its context path stays stable across stacks.
@@ -519,4 +497,4 @@ See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running
 
 ## Known Assumption
 
-This repo currently assumes the HXPR branch `master` can be built with the credentials you provide for GitHub Packages and Hyland Nexus. If you need a different HXPR branch or repo URL, override `HXPR_GIT_URL` and `HXPR_GIT_REF` in `.env.local`.
+This repo builds the `main` branch of `Hyland/ai-ready-index`. While that repository is private the source clone needs `HXPR_GIT_AUTH_TOKEN`. To build a different branch or repo URL, override `HXPR_GIT_URL` and `HXPR_GIT_REF` in `.env.local`.

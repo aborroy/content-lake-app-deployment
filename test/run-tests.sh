@@ -26,9 +26,9 @@ NUXEO_DIR="$(cd "$DEPLOY_DIR/../nuxeo-deployment" 2>/dev/null && pwd || true)"
 #
 # NOTE: we deliberately do NOT use `make up-<profile> local`. That target forces a
 # `--no-cache` rebuild of the WHOLE profile, including hxpr-app, whose Dockerfile clones the
-# private HylandSoftware/hxpr repo (SAML-gated) and needs Hyland Nexus creds. Instead we build
-# ONLY the local-source Content Lake app images (which is all a source change affects) and then
-# `up` WITHOUT `--build`, so the prebuilt hxpr/ACS/IDP images are reused. Build those
+# Hyland/ai-ready-index repo (private today, so the clone needs HXPR_GIT_AUTH_TOKEN). Instead we
+# build ONLY the local-source Content Lake app images (which is all a source change affects) and
+# then `up` WITHOUT `--build`, so the prebuilt hxpr/ACS images are reused. Build those
 # credential-gated images once via `make up-alfresco` before running this harness.
 USE_LOCAL="${USE_LOCAL:-1}"
 
@@ -144,7 +144,7 @@ stack_up() {
     # shellcheck disable=SC2086
     dc --profile "$profile" build $services || return 1
   fi
-  # `up` without --build: prebuilt hxpr/ACS/IDP images are reused; only missing images build.
+  # `up` without --build: prebuilt hxpr/ACS images are reused; only missing images build.
   dc --profile "$profile" up -d
 }
 

@@ -32,10 +32,10 @@ Nuxeo Web UI URL).
 
 ```yaml
 hxpr:
-  base-url: http://hxpr-app:8080
-  token-url: http://idp:8080/realms/hyland/protocol/openid-connect/token
-  client-id: content-lake-client
-  client-secret: ...
+  url: http://hxpr-app:8080
+  repository-id: default
+  username: admin      # engine HTTP Basic auth (filestore user store)
+  password: password
 
 spring:
   ai:

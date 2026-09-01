@@ -265,13 +265,14 @@ EOF
 ## 12. Export Build Credentials
 
 ```bash
-export MAVEN_USERNAME=<github-username>
-export MAVEN_PASSWORD=<github-pat-with-read:packages>
+# Required while Hyland/ai-ready-index is private (source clone)
+export HXPR_GIT_AUTH_TOKEN=<github-pat-with-repo-read>
+
+# Optional: only if the engine build resolves a private artifact from the hylandsoftware-releases Nexus repo
 export NEXUS_USERNAME=<hyland-nexus-username>
 export NEXUS_PASSWORD=<hyland-nexus-password>
-
-# Only needed if HylandSoftware/hxpr is not cloneable anonymously
-export HXPR_GIT_AUTH_TOKEN=<github-pat-with-repo-read>
+export MAVEN_USERNAME=<github-username>
+export MAVEN_PASSWORD=<github-pat-with-read:packages>
 ```
 
 See the [Getting Credentials](../README.md#getting-credentials) section in the main README for
@@ -369,12 +370,8 @@ flowchart LR
     Mongo["mongodb"]
     OpenSearch["opensearch"]
     OSD["opensearch-dashboards"]
-    Idp["idp"]
     Localstack["localstack"]
     Mockoon["mockoon"]
-    Aio["aio"]
-    Router["router"]
-    Rest["rest"]
   end
 
   AiProxy --> TEI
@@ -408,48 +405,33 @@ flowchart LR
   Batch --> ActiveMQ
   Batch --> Alfresco
   Batch --> Transform
-  Batch --> Idp
   Batch --> HxprApp
   Batch -.-> AiProxy
 
   Live --> ActiveMQ
   Live --> Alfresco
   Live --> Transform
-  Live --> Idp
   Live --> HxprApp
   Live -.-> AiProxy
 
   NuxeoBatch --> Nuxeo
-  NuxeoBatch --> Idp
   NuxeoBatch --> HxprApp
   NuxeoBatch -.-> AiProxy
 
   NuxeoLive --> Nuxeo
-  NuxeoLive --> Idp
   NuxeoLive --> HxprApp
   NuxeoLive -.-> AiProxy
 
   Rag --> Alfresco
   Rag --> Nuxeo
-  Rag --> Idp
   Rag --> HxprApp
   Rag -.-> AiProxy
 
   HxprApp --> Mongo
   HxprApp --> OpenSearch
-  HxprApp --> Idp
   HxprApp --> Localstack
   HxprApp --> Mockoon
-  HxprApp --> Router
-  HxprApp --> Rest
 
-  Router --> Aio
-  Router --> Localstack
-  Rest --> Router
-  Rest --> Localstack
-  Rest --> Idp
-  Aio --> Rest
-  Aio --> Localstack
 ```
 
 Notes:

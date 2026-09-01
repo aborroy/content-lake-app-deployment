@@ -65,19 +65,14 @@ Provisioning logs (idempotent - "Found existing ..." on subsequent runs):
 docker logs content-lake-app-batch-ingester-1 2>&1 | grep -iE "graph|ontolog|provision"
 ```
 
-Query the hxpr graph API directly (token via the IDP; run inside the hxpr-app container, which has
+Query the engine graph API directly (HTTP Basic; run inside the hxpr-app container, which has
 `curl`):
 
 ```bash
 # from content-lake-app-deployment/ with the env sourced
 set -a; . ./.env; [ -f ./.env.local ] && . ./.env.local; set +a
-docker exec -e HXPR_IDP_CLIENT_ID -e HXPR_IDP_CLIENT_SECRET -e HXPR_IDP_USERNAME \
-  -e HXPR_IDP_PASSWORD -e HXPR_REPOSITORY_ID content-lake-app-hxpr-app-1 sh -c '
-    TOK=$(curl -s http://idp:8080/idp/connect/token -d grant_type=password \
-      -d "scope=openid profile email" -d "client_id=$HXPR_IDP_CLIENT_ID" \
-      -d "client_secret=$HXPR_IDP_CLIENT_SECRET" -d "username=$HXPR_IDP_USERNAME" \
-      -d "password=$HXPR_IDP_PASSWORD" | sed -n "s/.*\"access_token\":\"\([^\"]*\)\".*/\1/p")
-    curl -s -H "Authorization: Bearer $TOK" -H "HXCS-REPOSITORY: $HXPR_REPOSITORY_ID" \
+docker exec -e HXPR_USERNAME -e HXPR_PASSWORD -e HXPR_REPOSITORY_ID content-lake-app-hxpr-app-1 sh -c '
+    curl -s -u "$HXPR_USERNAME:$HXPR_PASSWORD" -H "HXCS-REPOSITORY: $HXPR_REPOSITORY_ID" \
       "http://localhost:8080/api/graph/graphdbs?limit=100"'
 ```
 
@@ -91,5 +86,5 @@ a `graphdbs/{id}/config` route mapping `content.sys_primaryType == "SysFile"` to
   they select the version when creating the graphDB.
 - The uploaded ontology YAML is stored verbatim by hxpr (no parse-time validation); it declares the
   base entity vocabulary (Document, Person, Organization, Location, Concept) and relationships.
-- The hxpr service account (IDP client) must hold `content-lake-api.graph-configs.*` (or
+- The engine user (`HXPR_USERNAME`) must hold `content-lake-api.graph-configs.*` (or
   `hxpr.manage.everything`) for graphDB/ontology create and routing calls.
