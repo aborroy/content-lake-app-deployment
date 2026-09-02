@@ -133,6 +133,8 @@ services:
       RAG_DEFAULT_MIN_SCORE: ${RAG_DEFAULT_MIN_SCORE:-0.0}
       RAG_MAX_CONTEXT_LENGTH: ${RAG_MAX_CONTEXT_LENGTH:-12000}
       RAG_USE_HYBRID_SEARCH: ${RAG_USE_HYBRID_SEARCH:-true}
+      # Persistent conversation summary (long-term memory), surfaced in the chat UI. On by default.
+      RAG_CONVERSATION_SUMMARY_ENABLED: ${RAG_CONVERSATION_SUMMARY_ENABLED:-true}
       SEMANTIC_SEARCH_MIN_SCORE: ${SEMANTIC_SEARCH_MIN_SCORE:-0.2}
       # Retrieval tunables. `environment` is an explicit mapping, so a variable absent from this
       # block never reaches the container however it is set on the host: the service silently keeps
