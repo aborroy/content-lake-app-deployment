@@ -50,7 +50,9 @@ set -e
 mvn --no-transfer-progress -nsu -pl server/hxpr-community-internal-app -am package -DskipTests
 SCRIPT
 
-FROM ghcr.io/hylandsoftware/corretto-sambuca-25:20260306@sha256:34fc8ddd10d51da8b38192e405c1c570e2d7130f98e134c368a6553a7759fbed
+# Public Amazon Corretto 25 on Alpine. The runtime stage needs only a JRE 25, curl and busybox
+# adduser/addgroup, so a public base keeps the image build free of credential-gated registries.
+FROM amazoncorretto:25-alpine
 
 ARG RUN_JAVA_VERSION=1.3.8
 ARG GROUP_NAME=Hyland
@@ -61,7 +63,8 @@ ARG USER_ID=33010
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en'
 ENV JAVA_OPTIONS=""
 
-RUN mkdir /deployments \
+RUN apk add --no-cache curl \
+    && mkdir /deployments \
     && curl https://repo1.maven.org/maven2/io/fabric8/run-java-sh/${RUN_JAVA_VERSION}/run-java-sh-${RUN_JAVA_VERSION}-sh.sh -o /deployments/run-java.sh
 
 COPY --from=build /workspace/hxpr/server/hxpr-community-internal-app/target/hxpr-community-internal-app-*.jar /deployments/
