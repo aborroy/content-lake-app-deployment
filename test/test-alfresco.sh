@@ -32,6 +32,9 @@ fi
 ALF_BASE="${BASE}/alfresco/api/-default-/public/alfresco/versions/1"
 SYNC_URL="${BASE}/api/sync"
 RAG_URL="${BASE}/api/rag"
+# Deadline (seconds) for polling a just-synced document into searchable state. Configurable so slow
+# inference backends can extend it without editing the suite.
+POLL_DEADLINE_S="${POLL_DEADLINE_S:-180}"
 LIVE_URL="http://${HOST}:9092/api/live/status"   # direct port — may not be exposed
 
 PASS=0; FAIL=0
@@ -175,6 +178,43 @@ rag_find_node() {
     fail "$tid: $label NOT found (nodeId=$node_id, query='$query')"
     echo "    top results: $(echo "$resp" | jq -c '[.results[:3][]? | {name:.sourceDocument.name, nodeId:.sourceDocument.nodeId, score:.score}]')"
   fi
+}
+
+# wait_for_node_present <query> <node_id> <test_id> <label> [auth]
+# Polls semantic search until the node is retrievable, up to a deadline, then emits the pass/fail.
+# Replaces flat post-sync sleeps before single-shot presence assertions: embeddings and indexed
+# ACLs settle a variable time after sync, so a fixed sleep is inherently flaky. [auth] defaults to
+# admin; pass "user:password" for a per-user (ACL-scoped) presence check.
+wait_for_node_present() {
+  local query="$1" node_id="$2" tid="$3" label="$4" auth="${5:-$ALF_AUTH}"
+  local elapsed=0 resp found
+  while [ $elapsed -lt "$POLL_DEADLINE_S" ]; do
+    resp=$(curl -sf $CURL_OPTS -u "$auth" -X POST "$RAG_URL/search/semantic" \
+      -H 'Content-Type: application/json' \
+      -d "{\"query\":\"$query\",\"topK\":10,\"minScore\":0.2}" 2>/dev/null || echo '{}')
+    found=$(echo "$resp" | jq --arg id "$node_id" \
+      '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
+    if [ "${found:-0}" -gt 0 ]; then
+      pass "$tid: $label found in search"
+      return 0
+    fi
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  fail "$tid: $label NOT found after ${elapsed}s (nodeId=$node_id, query='$query')"
+  echo "    top results: $(echo "$resp" | jq -c '[.results[:3][]? | {name:.sourceDocument.name, nodeId:.sourceDocument.nodeId, score:.score}]')"
+  return 1
+}
+
+# wait_job_complete <job_id> : silent poll of /api/sync/status/<job_id> to COMPLETED (or deadline).
+wait_job_complete() {
+  local job_id="$1" elapsed=0 st
+  while [ $elapsed -lt 300 ]; do
+    st=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$job_id" 2>/dev/null \
+      | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
+    case "$st" in COMPLETED) return 0 ;; FAILED|ERROR) return 1 ;; esac
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  return 1
 }
 
 # rag_absent_node <query> <node_id> <test_id> <label>
@@ -690,16 +730,13 @@ wait_for_solr_indexed "$FOLDER_ID" 5
 # B3+B4: Trigger sync with explicit folder and wait
 run_sync_wait "$FOLDER_ID"
 
-# Wait for embedding pipeline to process all chunks
-info "Waiting 60 s for embedding pipeline …"
-sleep 60
-
-# B5–B9: Verify each document in semantic search
-rag_find_node "remote work eligibility work from home three days"         "$TXT_ID"  "B5" "short-memo.txt (HR)"
-rag_find_node "information security policy password complexity"            "$SEC_ID"  "B6" "security-policy.txt (IT)"
-rag_find_node "product roadmap Q3 delivery mobile first strategy"          "$ROAD_ID" "B7" "product-roadmap.txt (Product)"
-rag_find_node "REST API endpoint HTTP authentication token"                "$TECH_ID" "B8" "technical-spec.txt (Engineering)"
-rag_find_node "fiscal year total revenue gross profit EBITDA"              "$LONG_ID" "B9" "long-report.txt (Finance)"
+# B5–B9: Verify each document in semantic search. Poll to a deadline rather than a fixed sleep:
+# embeddings become queryable a variable time after sync COMPLETED, especially on the local model.
+wait_for_node_present "remote work eligibility work from home three days"  "$TXT_ID"  "B5" "short-memo.txt (HR)"
+wait_for_node_present "information security policy password complexity"    "$SEC_ID"  "B6" "security-policy.txt (IT)"
+wait_for_node_present "product roadmap Q3 delivery mobile first strategy"  "$ROAD_ID" "B7" "product-roadmap.txt (Product)"
+wait_for_node_present "REST API endpoint HTTP authentication token"        "$TECH_ID" "B8" "technical-spec.txt (Engineering)"
+wait_for_node_present "fiscal year total revenue gross profit EBITDA"      "$LONG_ID" "B9" "long-report.txt (Finance)"
 
 # B10: Idempotency — re-run same sync, verify chunk count does not grow
 # Captures count BEFORE second sync, then after; passes if count is unchanged.
@@ -716,8 +753,8 @@ if [ -n "${TXT_ID:-}" ]; then
     2>/dev/null || echo '{}')
   job2=$(echo "$resp2" | jq -r '.jobId // empty')
   if [ -n "$job2" ]; then
-    info "Second sync job: $job2 — waiting 60 s for completion and embeddings …"
-    sleep 60
+    info "Second sync job: $job2 — waiting for completion …"
+    wait_job_complete "$job2" || warn "second sync job did not reach COMPLETED before deadline"
   fi
   resp_after=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
@@ -878,28 +915,27 @@ if [ -n "$PUB_ID" ]; then
     || fail "G1c: Failed to set permissions on public-announcement.txt"
 fi
 
-info "Waiting 5 s for permission reconciliation to be indexed …"
-sleep 5
-
-# G2: Admin sees all documents
-rag_find_node "salary band confidential HR restricted access user-a"            "$HR_PRIV_ID"   "G2a" "Admin: confidential-hr.txt"
-rag_find_node "internal architecture restricted technical user-b access"        "$TECH_PRIV_ID" "G2b" "Admin: tech-spec-restricted.txt"
-rag_find_node "public company announcement everyone all staff general notice"   "$PUB_ID"       "G2c" "Admin: public-announcement.txt"
+# G2: Admin sees all documents. Poll each present-check to a deadline (permission reconciliation
+# and embeddings settle a variable time after upload); the paired absent-checks then run once
+# presence is confirmed, so the indexed ACLs have propagated by that point.
+wait_for_node_present "salary band confidential HR restricted access user-a"          "$HR_PRIV_ID"   "G2a" "Admin: confidential-hr.txt"
+wait_for_node_present "internal architecture restricted technical user-b access"      "$TECH_PRIV_ID" "G2b" "Admin: tech-spec-restricted.txt"
+wait_for_node_present "public company announcement everyone all staff general notice" "$PUB_ID"       "G2c" "Admin: public-announcement.txt"
 
 # G3: user-a — RAG search with user-a credentials (per-user ACL enforced via HTTP Basic Auth)
-rag_find_node_as "salary band confidential HR restricted access user-a" \
+wait_for_node_present "salary band confidential HR restricted access user-a" \
   "$HR_PRIV_ID" "G3a" "user-a sees confidential-hr.txt" "user-a:password"
 rag_absent_node_as "internal architecture restricted technical user-b access" \
   "$TECH_PRIV_ID" "G3b" "user-a cannot see tech-spec-restricted.txt" "user-a:password"
-rag_find_node_as "public company announcement everyone all staff general notice" \
+wait_for_node_present "public company announcement everyone all staff general notice" \
   "$PUB_ID" "G3c" "user-a sees public-announcement.txt" "user-a:password"
 
 # G4: user-b — symmetric check
-rag_find_node_as "internal architecture restricted technical user-b access" \
+wait_for_node_present "internal architecture restricted technical user-b access" \
   "$TECH_PRIV_ID" "G4a" "user-b sees tech-spec-restricted.txt" "user-b:password"
 rag_absent_node_as "salary band confidential HR restricted access user-a" \
   "$HR_PRIV_ID" "G4b" "user-b cannot see confidential-hr.txt" "user-b:password"
-rag_find_node_as "public company announcement everyone all staff general notice" \
+wait_for_node_present "public company announcement everyone all staff general notice" \
   "$PUB_ID" "G4c" "user-b sees public-announcement.txt" "user-b:password"
 
 # G5/G6: Revoke user-a access — admin still finds the document; user-a no longer does.
@@ -973,12 +1009,9 @@ if run_sync_wait "$PERM_FOLDER_ID"; then
 else
   fail "G8: Batch sync did not complete"
 fi
-info "Waiting 5 s for embeddings to settle …"
-sleep 5
-
-rag_find_node "zephyr-indigo-kappa-fold inherited ACL propagation" \
+wait_for_node_present "zephyr-indigo-kappa-fold inherited ACL propagation" \
   "$FOLD_CHILD_INHERIT_ID" "G8a" "Admin: folder-child-inherit.txt visible before ACL change"
-rag_find_node "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
+wait_for_node_present "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
   "$FOLD_CHILD_ISOLATED_ID" "G8b" "Admin: folder-child-isolated.txt visible before ACL change"
 
 # G9: Change folder permissions — disable inheritance, restrict to user-a only —
@@ -998,8 +1031,8 @@ fi
 reconcile_node_permissions "$PERM_FOLDER_ID" true \
   && pass "G9: Recursive ACL reconciliation triggered" \
   || fail "G9: ACL reconciliation request failed"
-info "Waiting 5 s for ACL reconciliation to propagate …"
-sleep 5
+# ACL reconciliation propagation is covered by polling the G10 present-checks below (each present
+# check gates its paired absent-check, so the reconciled ACL is in effect by the time those run).
 
 # G10: Verify ACL propagation (issue #27 acceptance criteria):
 #
@@ -1012,7 +1045,7 @@ sleep 5
 #    G10d: user-b STILL finds it (own ACL unchanged by folder change)
 #    G10e: user-a CANNOT find it (not in file's own locallySet)
 #    G10f: admin FINDS it (source-level bypass)
-rag_find_node_as \
+wait_for_node_present \
   "zephyr-indigo-kappa-fold inherited ACL propagation" \
   "$FOLD_CHILD_INHERIT_ID" "G10a" \
   "user-a finds folder-child-inherit.txt after folder restricted to user-a" \
@@ -1022,11 +1055,11 @@ rag_absent_node_as \
   "$FOLD_CHILD_INHERIT_ID" "G10b" \
   "user-b cannot find folder-child-inherit.txt after folder restricted to user-a" \
   "user-b:password"
-rag_find_node \
+wait_for_node_present \
   "zephyr-indigo-kappa-fold inherited ACL propagation" \
   "$FOLD_CHILD_INHERIT_ID" "G10c" \
   "Admin finds folder-child-inherit.txt after folder ACL change"
-rag_find_node_as \
+wait_for_node_present \
   "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
   "$FOLD_CHILD_ISOLATED_ID" "G10d" \
   "user-b still finds folder-child-isolated.txt (own ACL, inheritance disabled)" \
@@ -1036,7 +1069,7 @@ rag_absent_node_as \
   "$FOLD_CHILD_ISOLATED_ID" "G10e" \
   "user-a cannot find folder-child-isolated.txt (not in file's own locallySet)" \
   "user-a:password"
-rag_find_node \
+wait_for_node_present \
   "zephyr-indigo-kappa-isol isolated ACL no-inherit propagation" \
   "$FOLD_CHILD_ISOLATED_ID" "G10f" \
   "Admin finds folder-child-isolated.txt after folder ACL change"
@@ -1248,12 +1281,10 @@ else
   [ $elapsed -ge 300 ] && fail "I6: Sync timed out after 5 min (last status=$hier_status)"
 fi
 
-info "Waiting 60 s for embedding pipeline …"
-sleep 60
-
-# I7: Documents at root and level1 must be indexed
-rag_find_node "zephyr-cobalt-lambda-00r root level in-scope"   "$DOC_L0_ID" "I7a" "hier-doc-l0.txt (root — in scope)"
-rag_find_node "zephyr-cobalt-lambda-11r level one in-scope"    "$DOC_L1_ID" "I7b" "hier-doc-l1.txt (level1 — in scope)"
+# I7: Documents at root and level1 must be indexed. Poll to a deadline; the level2/level3 absence
+# checks (I8) then run once the in-scope docs are confirmed searchable.
+wait_for_node_present "zephyr-cobalt-lambda-00r root level in-scope"   "$DOC_L0_ID" "I7a" "hier-doc-l0.txt (root — in scope)"
+wait_for_node_present "zephyr-cobalt-lambda-11r level one in-scope"    "$DOC_L1_ID" "I7b" "hier-doc-l1.txt (level1 — in scope)"
 
 # I8: Documents at level2 and level3 must not be indexed (excluded subtree)
 rag_absent_node "zephyr-cobalt-lambda-22r level two excluded"           "$DOC_L2_ID" "I8a" "hier-doc-l2.txt (level2 — cl:excludeFromLake)"

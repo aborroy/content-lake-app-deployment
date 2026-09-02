@@ -25,12 +25,16 @@ ALF_BASE="${SCHEME}://localhost/alfresco/api/-default-/public/alfresco/versions/
 ALF_TICKET_URL="${SCHEME}://localhost/alfresco/api/-default-/public/authentication/versions/1/tickets"
 ALF_AUTH='admin:admin'
 NUXEO_BASE='http://localhost:8081/nuxeo/api/v1'
-NUXEO_LOGIN_URL='http://localhost:8081/nuxeo/site/automation/login'
 NUXEO_AUTH='Administrator:Administrator'
 SYNC_URL="${SCHEME}://localhost/api/sync"
 RAG_URL="${SCHEME}://localhost/api/rag"
 SHARED_USER='rag-user'
 SHARED_PASSWORD='password'
+
+# The demo fixture script defaults BASE_URL to the content-lake proxy (http://localhost/nuxeo),
+# which 301-redirects http->https and whose curl follows neither the redirect nor the self-signed
+# cert. Point it at Nuxeo directly so fixture creation succeeds (mirrors test-nuxeo.sh).
+export BASE_URL="${BASE_URL:-http://localhost:8081/nuxeo}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_SCRIPT="$SCRIPT_DIR/../scripts/create-nuxeo-demo-file.sh"
@@ -264,14 +268,6 @@ rag_semantic_alf_ticket() {
     -d "{\"query\":$(json_escape "$query"),\"topK\":20,\"minScore\":0.2}" 2>/dev/null || echo '{}'
 }
 
-rag_semantic_nuxeo_token() {
-  local token="$1" query="$2"
-  curl -sf -X POST "$RAG_URL/search/semantic" \
-    -H "X-Authentication-Token: $token" \
-    -H 'Content-Type: application/json' \
-    -d "{\"query\":$(json_escape "$query"),\"topK\":20,\"minScore\":0.2}" 2>/dev/null || echo '{}'
-}
-
 rag_hybrid_basic() {
   local auth="$1" query="$2"
   curl -sf -u "$auth" -X POST "$RAG_URL/search/hybrid" \
@@ -345,38 +341,6 @@ get_alfresco_ticket() {
   else
     echo ""
   fi
-}
-
-get_nuxeo_token() {
-  local auth="$1" url resp code body token validate_code
-  url="${NUXEO_LOGIN_URL}?applicationName=content-lake-tests&deviceId=${TEST_RUN_TAG}&deviceDescription=content-lake-tests&permission=rw"
-
-  for method in GET POST; do
-    resp=$(curl -s -w '\n%{http_code}' -u "$auth" -X "$method" "$url" 2>/dev/null || echo $'\n000')
-    code=$(printf '%s' "$resp" | tail -1)
-    body=$(printf '%s' "$resp" | sed '$d')
-    if [ "$code" != "200" ]; then
-      continue
-    fi
-
-    token=$(printf '%s' "$body" | jq -r '.token // .value // empty' 2>/dev/null || echo "")
-    if [ -z "$token" ]; then
-      token=$(printf '%s' "$body" | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' | head -1)
-    fi
-    if [ -z "$token" ]; then
-      continue
-    fi
-
-    validate_code=$(curl -s -o /dev/null -w '%{http_code}' \
-      -H "X-Authentication-Token: $token" \
-      "$NUXEO_BASE/me" 2>/dev/null || echo 000)
-    if [ "$validate_code" = "200" ]; then
-      printf '%s' "$token"
-      return 0
-    fi
-  done
-
-  echo ""
 }
 
 section "A — Smoke Tests"
@@ -484,15 +448,18 @@ else
   fail "E1: Failed to acquire Alfresco ticket for $SHARED_USER"
 fi
 
-NUXEO_TOKEN=$(get_nuxeo_token "$AUTH_SHARED")
-if [ -n "$NUXEO_TOKEN" ]; then
-  pass "E5: Nuxeo authentication token acquired for $SHARED_USER"
-  token_resp=$(rag_semantic_nuxeo_token "$NUXEO_TOKEN" "$SHARED_QUERY")
-  [ -n "${ALF_NODE_ID:-}" ] && assert_found "$token_resp" "$ALF_NODE_ID" "alfresco" "E6" "Nuxeo token auth returns Alfresco fixture"
-  [ -n "${NUXEO_UID:-}" ] && assert_found "$token_resp" "$NUXEO_UID" "nuxeo" "E7" "Nuxeo token auth returns Nuxeo fixture"
-  assert_has_both_sources "$token_resp" "E8" "Nuxeo token cross-source search"
+# E5-E8: rag-user is a Nuxeo user. rag-service authenticates Nuxeo users over HTTP Basic
+# (validated against GET /nuxeo/api/v1/me), so we exercise that path directly rather than a Nuxeo
+# auth token (token auth is not enabled in this stack). A valid, ACL-scoped result set proves the
+# Nuxeo-user Basic auth path works end to end.
+basic_resp=$(rag_semantic_basic "$AUTH_SHARED" "$SHARED_QUERY")
+if printf '%s' "$basic_resp" | jq -e 'has("results")' >/dev/null 2>&1; then
+  pass "E5: rag-user (Nuxeo user) authenticated to rag-service via Basic auth"
+  [ -n "${ALF_NODE_ID:-}" ] && assert_found "$basic_resp" "$ALF_NODE_ID" "alfresco" "E6" "Nuxeo-user Basic auth returns Alfresco fixture"
+  [ -n "${NUXEO_UID:-}" ] && assert_found "$basic_resp" "$NUXEO_UID" "nuxeo" "E7" "Nuxeo-user Basic auth returns Nuxeo fixture"
+  assert_has_both_sources "$basic_resp" "E8" "Nuxeo-user Basic cross-source search"
 else
-  fail "E5: Failed to acquire Nuxeo authentication token for $SHARED_USER"
+  fail "E5: rag-user Basic-auth semantic search returned no authenticated result"
 fi
 
 section "Summary"

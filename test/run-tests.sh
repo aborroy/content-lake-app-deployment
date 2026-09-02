@@ -149,8 +149,12 @@ stack_up() {
 }
 
 stack_down() {
-  dc --profile '*' down
-  [ -d "$NUXEO_DIR" ] && ( cd "$NUXEO_DIR" && docker compose down 2>/dev/null || true )
+  # Wipe volumes between phases (-v). Without this the hxpr/OpenSearch index persists across phases,
+  # so a later phase (notably the Phase 3 retrieval-quality gate, which runs `cleval ingest --clean`)
+  # sees earlier phases' documents and aborts on a "duplicated index". Each phase ingests its own
+  # fixtures, so a clean index per phase is the intended state.
+  dc --profile '*' down -v
+  [ -d "$NUXEO_DIR" ] && ( cd "$NUXEO_DIR" && docker compose down -v 2>/dev/null || true )
 }
 
 # ── Phase 1: Alfresco ─────────────────────────────────────────────────────────
@@ -171,6 +175,13 @@ wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200; proceeding anyway"
 ok "RAG service is up"
 assert_local_build
+
+# The smoke suite probes /api/sync/status immediately; wait for the batch ingester so the first
+# probe does not race a still-starting upstream (nginx returns 502 for an unreachable upstream).
+info "Waiting for the batch ingester (up to 3 min) …"
+wait_for_url "$BASE/api/sync/status" 'admin:admin' 36 5 \
+  || warn "batch-ingester /api/sync/status not returning 200; proceeding anyway"
+ok "Batch ingester is up"
 
 banner "Running Alfresco test suite"
 ALFRESCO_RC=0
@@ -201,8 +212,12 @@ wait_for_url "$BASE/api/rag/health" '' 36 5 \
 ok "RAG service is up"
 assert_local_build
 
-info "Waiting 30 s for Nuxeo ingesters to initialise …"
-sleep 30
+# Route the readiness probe to the Nuxeo ingester (?sourceType=nuxeo); the default sync backend is
+# the Alfresco batch-ingester, which is not running in the nuxeo profile.
+info "Waiting for the Nuxeo batch ingester (up to 3 min) …"
+wait_for_url "$BASE/api/sync/status?sourceType=nuxeo" 'Administrator:Administrator' 36 5 \
+  || warn "nuxeo-batch-ingester /api/sync/status not returning 200; proceeding anyway"
+ok "Nuxeo batch ingester is up"
 
 banner "Running Nuxeo test suite"
 NUXEO_RC=0
@@ -235,6 +250,13 @@ wait_for_url "$BASE/api/rag/health" '' 36 5 \
   || warn "RAG service health endpoint not returning 200 in full mode; proceeding anyway"
 ok "RAG service is up"
 assert_local_build
+
+info "Waiting for the batch ingesters (up to 3 min) …"
+wait_for_url "$BASE/api/sync/status" 'admin:admin' 36 5 \
+  || warn "batch-ingester /api/sync/status not returning 200; proceeding anyway"
+wait_for_url "$BASE/api/sync/status?sourceType=nuxeo" 'Administrator:Administrator' 36 5 \
+  || warn "nuxeo-batch-ingester /api/sync/status not returning 200; proceeding anyway"
+ok "Batch ingesters are up"
 
 info "Waiting 30 s for full-stack ingesters to initialise …"
 sleep 30

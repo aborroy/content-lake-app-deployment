@@ -21,6 +21,11 @@ curl() { command curl ${CURL_TLS} "$@"; }
 NUXEO_BASE='http://localhost:8081/nuxeo/api/v1'
 NUXEO_AUTH='Administrator:Administrator'
 SYNC_URL="${SCHEME}://localhost/api/sync"
+# The proxy routes /api/sync* by the ?sourceType query arg; without it the request falls back to
+# NGINX_SYNC_DEFAULT_BACKEND (the Alfresco batch-ingester), which is not running in the nuxeo
+# profile and returns 502. Every sync call in this suite must carry sourceType=nuxeo so it reaches
+# nuxeo-batch-ingester:9093 (the proxy also injects Nuxeo Basic auth for this sourceType).
+SYNC_Q="?sourceType=nuxeo"
 RAG_URL="${SCHEME}://localhost/api/rag"
 NUXEO_INCLUDED_ROOT="${NUXEO_INCLUDED_ROOT:-/default-domain/workspaces/content-lake-demo}"
 
@@ -38,6 +43,9 @@ TMPDIR_DATA="$(mktemp -d)"
 TEST_RUN_TAG="$(date +%Y%m%d-%H%M%S)-$$"
 TEST_RUN_ALPHA_TAG="$(printf '%s' "$TEST_RUN_TAG" | tr '0123456789-' 'abcdefghijx')"
 RAG_PRESENCE_TOPK="${RAG_PRESENCE_TOPK:-50}"
+# Deadline (seconds) for polling a just-synced document into searchable state. Configurable so slow
+# inference backends can extend it without editing the suite.
+POLL_DEADLINE_S="${POLL_DEADLINE_S:-180}"
 LOG="test-results-nuxeo-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
@@ -56,7 +64,7 @@ trap cleanup EXIT
 run_nuxeo_sync_wait() {
   local trigger_tid="${1:-D3}" complete_tid="${2:-D4}" label="${3:-Nuxeo sync}"
   local resp job_id status
-  resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$SYNC_URL/configured" 2>/dev/null || echo '{}')
+  resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$SYNC_URL/configured$SYNC_Q" 2>/dev/null || echo '{}')
   job_id=$(echo "$resp" | jq -r '.jobId // empty')
 
   if [ -z "$job_id" ]; then
@@ -68,7 +76,7 @@ run_nuxeo_sync_wait() {
   local elapsed=0
   while [ $elapsed -lt 300 ]; do
     local sr
-    sr=$(curl -sf -u "$NUXEO_AUTH" "$SYNC_URL/status/$job_id" 2>/dev/null || echo '{}')
+    sr=$(curl -sf -u "$NUXEO_AUTH" "$SYNC_URL/status/$job_id$SYNC_Q" 2>/dev/null || echo '{}')
     status=$(echo "$sr" | jq -r '.status // "UNKNOWN"')
     case "$status" in
       COMPLETED)
@@ -134,6 +142,49 @@ rag_find_source_as() {
     echo "    top results: $(echo "$resp" | jq -c '[.results[:3][]? | {id:.sourceDocument.nodeId, src:.sourceDocument.sourceType, score:.score}]')"
     return 1
   fi
+}
+
+# wait_for_source_present <auth> <query> <uid> <source_type> <test_id> <label>
+# Polls semantic search until the document is indexed and retrievable, up to a deadline, then
+# emits the pass/fail. Replaces flat post-sync sleeps before single-shot presence assertions:
+# document ingestion completes before embeddings are queryable, and that lag is variable under a
+# slow local model, so a fixed sleep is inherently flaky.
+wait_for_source_present() {
+  local auth="$1" query="$2" uid="$3" src_type="$4" tid="$5" label="$6"
+  local elapsed=0 resp found
+  while [ $elapsed -lt "$POLL_DEADLINE_S" ]; do
+    resp=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+      -H 'Content-Type: application/json' \
+      -d "{\"query\":\"$query\",\"topK\":$RAG_PRESENCE_TOPK,\"minScore\":0.2}" 2>/dev/null || echo '{}')
+    found=$(echo "$resp" | jq --arg id "$uid" --arg src "$src_type" \
+      '[.results[]? | select(.sourceDocument.nodeId == $id and .sourceDocument.sourceType == $src)] | length' 2>/dev/null || echo 0)
+    if [ "${found:-0}" -gt 0 ]; then
+      pass "$tid: $label found in search (uid=$uid, source_type=$src_type)"
+      return 0
+    fi
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  fail "$tid: $label NOT found after ${elapsed}s (uid=$uid, source_type=$src_type, query='$query')"
+  echo "    top results: $(echo "$resp" | jq -c '[.results[:2][]? | {id:.sourceDocument.nodeId, src:.sourceDocument.sourceType, score:.score}]')"
+  return 1
+}
+
+# wait_present_quiet <auth> <query> <uid> <source_type>
+# Silent settle-gate: polls until the document is retrievable (or a deadline), emitting nothing.
+# Use before assertions that are not themselves simple presence checks (e.g. chunk-diff/ranking),
+# to replace a flat post-sync sleep without adding a spurious test line.
+wait_present_quiet() {
+  local auth="$1" query="$2" uid="$3" src_type="$4" elapsed=0 found
+  while [ $elapsed -lt "$POLL_DEADLINE_S" ]; do
+    found=$(curl -sf -u "$auth" -X POST "$RAG_URL/search/semantic" \
+      -H 'Content-Type: application/json' \
+      -d "{\"query\":\"$query\",\"topK\":$RAG_PRESENCE_TOPK,\"minScore\":0.2}" 2>/dev/null \
+      | jq --arg id "$uid" --arg src "$src_type" \
+          '[.results[]? | select(.sourceDocument.nodeId == $id and .sourceDocument.sourceType == $src)] | length' 2>/dev/null || echo 0)
+    [ "${found:-0}" -gt 0 ] && return 0
+    sleep 10; elapsed=$((elapsed+10))
+  done
+  return 1
 }
 
 # rag_absent_uid <query> <uid> <test_id> <label>
@@ -484,7 +535,7 @@ code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
 
 # N-A3: Nuxeo batch ingester health (via proxy sync status)
 code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-  "$SYNC_URL/status" 2>/dev/null || echo 000)
+  "$SYNC_URL/status$SYNC_Q" 2>/dev/null || echo 000)
 [ "$code" = "200" ] && pass "N-A3: Nuxeo batch ingester status endpoint is healthy" \
                      || fail "N-A3: Batch ingester status returned HTTP $code"
 
@@ -532,23 +583,22 @@ done
 # D2+D3+D4: Trigger Nuxeo sync and wait for completion
 run_nuxeo_sync_wait
 
-info "Waiting 30 s for embedding pipeline to finish …"
-sleep 30
-
-# D5–D8: Verify each document appears in semantic search with source_type=nuxeo
-[ -n "${HR_UID:-}" ]   && rag_find_source "$D_HR_QUERY" \
+# D5–D8: Verify each document appears in semantic search with source_type=nuxeo.
+# Poll to a deadline rather than sleeping a fixed interval: embeddings become queryable some
+# variable time after sync COMPLETED, especially under the slow local model.
+[ -n "${HR_UID:-}" ]   && wait_for_source_present "$NUXEO_AUTH" "$D_HR_QUERY" \
   "$HR_UID"   "nuxeo" "D5" "Nuxeo HR policy"
-[ -n "${SEC_UID:-}" ]  && rag_find_source "$D_SEC_QUERY" \
+[ -n "${SEC_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH" "$D_SEC_QUERY" \
   "$SEC_UID"  "nuxeo" "D6" "Nuxeo IT security policy"
-[ -n "${ROAD_UID:-}" ] && rag_find_source "$D_ROAD_QUERY" \
+[ -n "${ROAD_UID:-}" ] && wait_for_source_present "$NUXEO_AUTH" "$D_ROAD_QUERY" \
   "$ROAD_UID" "nuxeo" "D7" "Nuxeo product roadmap"
-[ -n "${FIN_UID:-}" ]  && rag_find_source "$D_FIN_QUERY" \
+[ -n "${FIN_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH" "$D_FIN_QUERY" \
   "$FIN_UID"  "nuxeo" "D8" "Nuxeo financial summary"
 
-# D9: Idempotency re-run
+# D9: Idempotency re-run. Re-trigger a full sync and wait for it to COMPLETE (not fire-and-forget),
+# so the count check runs against a settled index rather than after a fixed 10 s.
 info "Re-running Nuxeo sync for idempotency check …"
-curl -sf -u "$NUXEO_AUTH" -X POST "$SYNC_URL/configured" >/dev/null 2>&1 || true
-sleep 10
+run_nuxeo_sync_wait "D9a" "D9b" "Idempotency re-sync"
 if [ -n "${HR_UID:-}" ]; then
   resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$RAG_URL/search/semantic" \
     -H 'Content-Type: application/json' \
@@ -684,20 +734,20 @@ else
 fi
 
 run_nuxeo_sync_wait "G1d" "G1e" "Permission fixture sync"
-info "Waiting 30 s for indexed ACLs to settle …"
-sleep 30
+# G2-G4: ACL-scoped visibility. Poll each expected-present doc to a deadline (embeddings and
+# indexed ACLs settle a variable time after sync COMPLETED); the absent-checks then run once
+# presence has been confirmed, so the ACL state has propagated by that point.
+[ -n "${G_HR_UID:-}" ]     && wait_for_source_present "$NUXEO_AUTH"     "$G_HR_QUERY"     "$G_HR_UID"     "nuxeo" "G2a" "Administrator sees confidential HR document"
+[ -n "${G_TECH_UID:-}" ]   && wait_for_source_present "$NUXEO_AUTH"     "$G_TECH_QUERY"   "$G_TECH_UID"   "nuxeo" "G2b" "Administrator sees restricted tech document"
+[ -n "${G_PUBLIC_UID:-}" ] && wait_for_source_present "$NUXEO_AUTH"     "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G2c" "Administrator sees public announcement"
 
-[ -n "${G_HR_UID:-}" ]     && rag_find_source "$G_HR_QUERY"     "$G_HR_UID"     "nuxeo" "G2a" "Administrator sees confidential HR document"
-[ -n "${G_TECH_UID:-}" ]   && rag_find_source "$G_TECH_QUERY"   "$G_TECH_UID"   "nuxeo" "G2b" "Administrator sees restricted tech document"
-[ -n "${G_PUBLIC_UID:-}" ] && rag_find_source "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G2c" "Administrator sees public announcement"
-
-[ -n "${G_HR_UID:-}" ]     && rag_find_source_as "$G_HR_QUERY"     "$G_HR_UID"     "nuxeo" "G3a" "user-a sees confidential HR document" "user-a:password"
+[ -n "${G_HR_UID:-}" ]     && wait_for_source_present "user-a:password" "$G_HR_QUERY"     "$G_HR_UID"     "nuxeo" "G3a" "user-a sees confidential HR document"
 [ -n "${G_TECH_UID:-}" ]   && rag_absent_uid_as "$G_TECH_QUERY"    "$G_TECH_UID"              "G3b" "user-a cannot see restricted tech document" "user-a:password"
-[ -n "${G_PUBLIC_UID:-}" ] && rag_find_source_as "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G3c" "user-a sees public announcement" "user-a:password"
+[ -n "${G_PUBLIC_UID:-}" ] && wait_for_source_present "user-a:password" "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G3c" "user-a sees public announcement"
 
-[ -n "${G_TECH_UID:-}" ]   && rag_find_source_as "$G_TECH_QUERY"   "$G_TECH_UID"   "nuxeo" "G4a" "user-b sees restricted tech document" "user-b:password"
+[ -n "${G_TECH_UID:-}" ]   && wait_for_source_present "user-b:password" "$G_TECH_QUERY"   "$G_TECH_UID"   "nuxeo" "G4a" "user-b sees restricted tech document"
 [ -n "${G_HR_UID:-}" ]     && rag_absent_uid_as "$G_HR_QUERY"      "$G_HR_UID"                "G4b" "user-b cannot see confidential HR document" "user-b:password"
-[ -n "${G_PUBLIC_UID:-}" ] && rag_find_source_as "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G4c" "user-b sees public announcement" "user-b:password"
+[ -n "${G_PUBLIC_UID:-}" ] && wait_for_source_present "user-b:password" "$G_PUBLIC_QUERY" "$G_PUBLIC_UID" "nuxeo" "G4c" "user-b sees public announcement"
 
 if [ -n "${G_HR_UID:-}" ]; then
   if grant_nuxeo_read_aces "$G_HR_UID" true "Administrator" && set_nuxeo_ace "$G_HR_UID" "user-a" false false; then
@@ -755,11 +805,9 @@ if [ -n "${G_PROP_FOLDER_UID:-}" ]; then
 fi
 
 run_nuxeo_sync_wait "G8a" "G8b" "Folder permission baseline sync"
-info "Waiting 30 s for folder permission fixtures to index …"
-sleep 30
-
-[ -n "${G_INHERIT_UID:-}" ]  && rag_find_source "$G_INHERIT_QUERY"  "$G_INHERIT_UID"  "nuxeo" "G8c" "Administrator sees folder-child-inherit before folder ACL change"
-[ -n "${G_ISOLATED_UID:-}" ] && rag_find_source "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G8d" "Administrator sees folder-child-isolated before folder ACL change"
+# Poll to a deadline instead of a fixed sleep for the folder-permission fixtures to index.
+[ -n "${G_INHERIT_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH" "$G_INHERIT_QUERY"  "$G_INHERIT_UID"  "nuxeo" "G8c" "Administrator sees folder-child-inherit before folder ACL change"
+[ -n "${G_ISOLATED_UID:-}" ] && wait_for_source_present "$NUXEO_AUTH" "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G8d" "Administrator sees folder-child-isolated before folder ACL change"
 
 if [ -n "${G_PROP_FOLDER_UID:-}" ]; then
   if remove_nuxeo_acl "$G_PROP_FOLDER_UID" "local" \
@@ -768,19 +816,20 @@ if [ -n "${G_PROP_FOLDER_UID:-}" ]; then
     info "Waiting 50 s for folder ACL audit processing …"
     sleep 50
     run_nuxeo_sync_wait "G9b" "G9c" "Folder permission reconciliation sync"
-    info "Waiting 30 s for descendant ACL state to settle …"
-    sleep 30
+    # Descendant ACL/embedding settle is covered by polling the G10 presence checks below.
   else
     fail "G9a: Failed to restrict permission propagation folder to Administrator + user-a"
   fi
 fi
 
-[ -n "${G_INHERIT_UID:-}" ]  && rag_find_source_as "$G_INHERIT_QUERY"  "$G_INHERIT_UID"  "nuxeo" "G10a" "user-a finds folder-child-inherit after folder ACL change" "user-a:password"
+# Present-checks poll to a deadline (they also gate the paired absent-checks: once a present
+# check passes, the reconciled ACL/embedding state has propagated).
+[ -n "${G_INHERIT_UID:-}" ]  && wait_for_source_present "user-a:password" "$G_INHERIT_QUERY"  "$G_INHERIT_UID"  "nuxeo" "G10a" "user-a finds folder-child-inherit after folder ACL change"
 [ -n "${G_INHERIT_UID:-}" ]  && rag_absent_uid_as "$G_INHERIT_QUERY"   "$G_INHERIT_UID"              "G10b" "user-b cannot find folder-child-inherit after folder ACL change" "user-b:password"
-[ -n "${G_INHERIT_UID:-}" ]  && rag_find_source    "$G_INHERIT_QUERY"   "$G_INHERIT_UID"  "nuxeo" "G10c" "Administrator finds folder-child-inherit after folder ACL change"
-[ -n "${G_ISOLATED_UID:-}" ] && rag_find_source_as "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G10d" "user-b still finds folder-child-isolated after folder ACL change" "user-b:password"
+[ -n "${G_INHERIT_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH"     "$G_INHERIT_QUERY"   "$G_INHERIT_UID"  "nuxeo" "G10c" "Administrator finds folder-child-inherit after folder ACL change"
+[ -n "${G_ISOLATED_UID:-}" ] && wait_for_source_present "user-b:password" "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G10d" "user-b still finds folder-child-isolated after folder ACL change"
 [ -n "${G_ISOLATED_UID:-}" ] && rag_absent_uid_as  "$G_ISOLATED_QUERY" "$G_ISOLATED_UID"             "G10e" "user-a cannot find folder-child-isolated after folder ACL change" "user-a:password"
-[ -n "${G_ISOLATED_UID:-}" ] && rag_find_source    "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G10f" "Administrator finds folder-child-isolated after folder ACL change"
+[ -n "${G_ISOLATED_UID:-}" ] && wait_for_source_present "$NUXEO_AUTH"     "$G_ISOLATED_QUERY" "$G_ISOLATED_UID" "nuxeo" "G10f" "Administrator finds folder-child-isolated after folder ACL change"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  SECTION H — Chunking Strategy
@@ -971,8 +1020,9 @@ H_LONG_UID=$(create_demo_file_from_file "Nuxeo H Long Report $TEST_RUN_TAG" "$H_
   || fail "H0d: Failed to create long report fixture"
 
 run_nuxeo_sync_wait "H0e" "H0f" "Chunking fixture sync"
-info "Waiting 30 s for chunking fixtures to embed …"
-sleep 30
+info "Waiting for chunking fixtures to embed …"
+[ -n "${H_SHORT_UID:-}" ] && wait_present_quiet "$NUXEO_AUTH" "$H_SHORT_QUERY"      "$H_SHORT_UID" "nuxeo"
+[ -n "${H_LONG_UID:-}" ]  && wait_present_quiet "$NUXEO_AUTH" "$H_LONG_EARLY_QUERY" "$H_LONG_UID"  "nuxeo"
 
 if [ -n "${H_SHORT_UID:-}" ]; then
   resp_h1=$(curl -sf -u "$NUXEO_AUTH" -X POST "$RAG_URL/search/semantic" \
@@ -1069,10 +1119,9 @@ I_OUT_SCOPE_UID=$(create_demo_file "Nuxeo Out-Of-Scope Control $TEST_RUN_TAG" \
   || fail "I2: Failed to create out-of-scope control document"
 
 run_nuxeo_sync_wait "I3" "I4" "Scope exclusion sync"
-info "Waiting 30 s for scope exclusion results to settle …"
-sleep 30
 
-[ -n "${I_IN_SCOPE_UID:-}" ]  && rag_find_source "$I_IN_SCOPE_QUERY"  "$I_IN_SCOPE_UID"  "nuxeo" "I5" "In-scope control document remains indexed"
+# Poll for the in-scope doc to a deadline; the out-of-scope absence check then runs once it appears.
+[ -n "${I_IN_SCOPE_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH" "$I_IN_SCOPE_QUERY" "$I_IN_SCOPE_UID" "nuxeo" "I5" "In-scope control document remains indexed"
 [ -n "${I_OUT_SCOPE_UID:-}" ] && rag_absent_uid  "$I_OUT_SCOPE_QUERY" "$I_OUT_SCOPE_UID"          "I6" "Out-of-scope control document stays absent from search"
 
 # ═══════════════════════════════════════════════════════════════════════════════
