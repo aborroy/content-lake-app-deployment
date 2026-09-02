@@ -12,8 +12,6 @@ volumes:
   opensearch-data:
   localstack-data:
   nuxeo-live-audit-data:
-  dgraph-zero-data:
-  dgraph-alpha-data:
 
 # ─── Build secrets ────────────────────────────────────────────────────────────
 secrets:

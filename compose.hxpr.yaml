@@ -96,46 +96,6 @@ services:
     networks:
       - stack
 
-  # ── Dgraph (knowledge-graph backend for the hxpr Graph API / GraphRAG) ────────
-  # Only reached when the graph feature flag is enabled on hxpr-app. Mirrors hxpr's
-  # own local-dev Dgraph setup (multi-tenant + ACL). Root ACL credentials and the
-  # per-namespace credential store live in localstack Secrets Manager (see
-  # localstack/init-additional.sh).
-  dgraph-zero:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: dgraph/dgraph:${DGRAPH_TAG:-v25.3.8}
-    restart: unless-stopped
-    command: dgraph zero --my=dgraph-zero:5080
-    volumes:
-      - dgraph-zero-data:/dgraph
-    networks:
-      - stack
-
-  dgraph-alpha:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: dgraph/dgraph:${DGRAPH_TAG:-v25.3.8}
-    restart: unless-stopped
-    command: >
-      dgraph alpha
-      --my=dgraph-alpha:7080
-      --zero=dgraph-zero:5080
-      --acl "secret-file=/dgraph/acl-secret/hmac_secret_file"
-      --security "whitelist=0.0.0.0/0"
-    volumes:
-      - ./hxpr/dgraph/acl-secret:/dgraph/acl-secret:ro
-      - dgraph-alpha-data:/dgraph
-    depends_on:
-      dgraph-zero:
-        condition: service_started
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 30s
-    networks:
-      - stack
-
   mockoon:
     profiles: [alfresco, nuxeo, full, demo]
     image: mockoon/cli:${MOCKOON_TAG:-9.3.0}
@@ -182,19 +142,6 @@ services:
         -Dnuxeo.aws.region=us-east-1
         -Dnuxeo.aws.endpoint=http://localstack:4566
         -Dnuxeo.aws.sns.topic.arn=arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
-        -Dfeature.flag.default.flags.content-context-graph-api=${HXPR_GRAPH_API_FEATURE:-true}
-        -Dgraphdb.enabled=true
-        -Dgraphdb.backend=dgraph
-        -Dgraphdb.dgraph.multitenant.max-count=10
-        -Dgraphdb.dgraph.multitenant.alpha.host=dgraph-alpha
-        -Dgraphdb.dgraph.multitenant.alpha.port=9080
-        -Dgraphdb.dgraph.multitenant.alpha.adminPort=8080
-        -Dgraphdb.dgraph.multitenant.alpha.graphqlAuthKey=my-dummy-secret-key-minimum-32-chars-long-12345678
-        -Dgraphdb.dgraph.multitenant.alpha.acl-credentials-secret-name=dgraph/acl/credentials
-        -Dgraphdb.dgraph.multitenant.alpha.tenant-credential-secret-name=dgraph-namespace-credentials
-        -Dgraphdb.dgraph.multitenant.alpha.root-username-key=root-username
-        -Dgraphdb.dgraph.multitenant.alpha.root-password-key=root-password
-        -Dontology.s3.bucket=ontology-bucket-1
       NUXEO_MONGODB_SERVER: mongodb:27017
       OPENSEARCH_ADDRESSLIST: http://opensearch:9200
       NUCLEUS_URL: http://mockoon:3002
@@ -207,8 +154,6 @@ services:
       AWS_DEFAULT_REGION: us-east-1
       AWS_SNS_ENDPOINT: http://localstack:4566
       AWS_SQS_ENDPOINT: http://localstack:4566
-      # Point the Secrets Manager client (Dgraph ACL/namespace credentials) at localstack.
-      AWS_ENDPOINT_URL_SECRETS_MANAGER: http://localstack:4566
     depends_on:
       mongodb:
         condition: service_healthy
@@ -219,8 +164,6 @@ services:
       localstack:
         condition: service_healthy
       mockoon:
-        condition: service_healthy
-      dgraph-alpha:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q UP || exit 1"]

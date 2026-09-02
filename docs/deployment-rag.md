@@ -67,7 +67,7 @@ rag:
     scan-enabled: false    # log chunks matching known injection patterns (does not drop them)
   rate-limit:              # per-principal request throttling
     enabled: false
-    generate-requests-per-minute: 20   # /api/rag/prompt, /api/rag/chat/stream, /api/rag/graph-prompt
+    generate-requests-per-minute: 20   # /api/rag/prompt, /api/rag/chat/stream
     search-requests-per-minute: 60     # /api/rag/search/**
   agentic-tools:           # let the LLM call retrieval tools mid-answer
     enabled: false
@@ -235,9 +235,6 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
   `verified` / `unsupportedClaims` to the prompt response), `RAG_CONVERSATION_SUMMARY_ENABLED`
   (persistent running summary under the hxpr `_sessions/` folder), and per-request `inferFilters` on
   `/api/rag/prompt` (LLM-inferred date/mime/path filters).
-- Graph-augmented retrieval: `RAG_GRAPH_ENABLED` turns on the rag-service `/api/rag/graph-prompt`
-  endpoint and graph expansion; the graph backend and provisioning are covered in
-  [deployment-graph.md](deployment-graph.md).
 - Semantic query caching: `RAG_CACHE_ENABLED` (default off) turns on a bounded, short-TTL in-memory
   cache of query embeddings and full retrieval results (`RAG_CACHE_TTL_SECONDS` default 60,
   `RAG_CACHE_MAX_SIZE` default 1000). Result-cache entries are scoped by the authenticated principal,
@@ -274,7 +271,7 @@ failed counts; the detailed per-job view remains at `GET /api/sync/status`.
 ## Rate Limiting
 
 When `rag.rate-limit.enabled=true`, a per-authenticated-principal token bucket throttles requests.
-Generation endpoints (`/api/rag/prompt`, `/api/rag/chat/stream`, `/api/rag/graph-prompt`) get a
+Generation endpoints (`/api/rag/prompt`, `/api/rag/chat/stream`) get a
 tighter budget (`generate-requests-per-minute`, default 20) than search (`/api/rag/search/**`,
 `search-requests-per-minute`, default 60). Exceeding the budget returns **HTTP 429** with a
 `Retry-After` header. Buckets are in-memory and therefore per-instance; a multi-instance deployment

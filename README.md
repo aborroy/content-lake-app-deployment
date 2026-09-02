@@ -68,7 +68,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 |---|---|
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
-| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, localstack, mockoon, opensearch-dashboards\*, dgraph-zero/dgraph-alpha (GraphRAG) |
+| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, localstack, mockoon, opensearch-dashboards\* |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 
@@ -82,7 +82,6 @@ designed to be run in isolation.
 | [docs/deployment-alfresco.md](docs/deployment-alfresco.md) | Full stack prerequisites, credentials, first run, Alfresco requirements, configuration reference |
 | [docs/deployment-nuxeo.md](docs/deployment-nuxeo.md) | Nuxeo stack setup, REST API reference, scope/auth config, audit live sync |
 | [docs/deployment-rag.md](docs/deployment-rag.md) | RAG service configuration, REST API, security, conversation memory, observability |
-| [docs/deployment-graph.md](docs/deployment-graph.md) | Knowledge Graph (GraphRAG) backend: Dgraph, hxpr graph feature flag, provisioning, enabling and verifying |
 | [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) | Step-by-step guide to running the full stack on AWS EC2 |
 
 ## Service Topology
