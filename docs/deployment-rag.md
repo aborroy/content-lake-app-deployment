@@ -243,6 +243,12 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
   `{cache=rag.query.embeddings}` under `/actuator/metrics`.
 - User feedback capture: `RAG_FEEDBACK_ENABLED` (default **on**) exposes `POST/GET /api/rag/feedback`;
   `RAG_FEEDBACK_BASE_PATH` (default `/_feedback`) is the hxpr folder feedback is stored under.
+- Named-query discovery: `RAG_NAMEDQUERY_DISCOVERY_ENABLED` (default **on**) controls whether
+  `GET /api/rag/named-queries` lists the named queries registered in hxpr. The UI turns that list
+  into a "Saved query" selector and hides the selector when the list is empty, so set it to `false`
+  where hxpr only has its own internals registered (`tree_children`, `simple_search`,
+  `folder_listing`, ...) and there is nothing curated to offer. Discovery only: a `namedQuery` a
+  client names explicitly on a search request is still applied.
 
 ### Health check (public)
 
