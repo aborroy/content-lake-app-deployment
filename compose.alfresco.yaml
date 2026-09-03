@@ -146,6 +146,15 @@ services:
       ALFRESCO_REINDEX_CONTINUOUS_CATCHUPPOLLINGINTERVAL: 1s
       ALFRESCO_REINDEX_CONTINUOUS_MAXWINDOW: 30m
       ALFRESCO_REINDEX_CONTINUOUS_OVERLAP: 10m
+      # The indexer reads the repository straight from the database, so it resolves namespace
+      # URI -> prefix from a static file instead of the repository dictionary. The bundled
+      # classpath:reindex.prefixes-file.json only lists stock Alfresco namespaces, so every
+      # cl:* aspect and property is dropped ("impossible to get prefixed name of ...") and no
+      # cl:* field ever reaches the index. acs/search/reindex.prefixes-file.json is that file
+      # plus the content-lake namespace.
+      ALFRESCO_REINDEX_PREFIXES_FILE: file:/opt/search/reindex.prefixes-file.json
+    volumes:
+      - ./acs/search/reindex.prefixes-file.json:/opt/search/reindex.prefixes-file.json:ro
     depends_on:
       alfresco:
         condition: service_healthy
