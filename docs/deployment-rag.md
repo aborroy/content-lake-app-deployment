@@ -182,6 +182,14 @@ Accept: text/event-stream
 }
 ```
 
+Event sequence: `token` per delta, then `metadata` with the full response (sources, timings,
+`requestId`), then `done`. With `"responseFormat": "STRUCTURED"` a `structured` event carrying the
+typed answer arrives between `metadata` and `done`, rather than inside `metadata`: deriving it is a
+second LLM pass over the finished answer, so sending it inline would leave the client holding a
+complete answer with no sources for the length of that call. Clients should render on `metadata` and
+fill the structured block when the later event lands. The non-streaming `/api/rag/prompt` still
+returns `structured` inside its single response.
+
 ### Feedback (answer rating)
 
 ```http
