@@ -45,6 +45,21 @@ hxpr, e.g. `docker compose --profile alfresco --profile filesystem up -d --build
 It ingests a mounted directory (default `./filesystem-data`, override with `FILESYSTEM_HOST_PATH`) and
 stays idle until you trigger `POST /api/sync/configured`, so an empty directory is harmless.
 
+A filesystem source has no user directory, so unlike the Alfresco and Nuxeo ingesters this service
+cannot authenticate callers against a repository. It guards its sync API with one configured account
+instead, from `FILESYSTEM_SYNC_USERNAME` and `FILESYSTEM_SYNC_PASSWORD`. Neither has a default and
+the container refuses to start unless both are set, so the endpoint that triggers a full re-ingest is
+never reachable with a credential shipped in this repository. Both keys are present but empty in
+`.env`; put your own values in `.env.local`, which is not tracked.
+
+The service publishes no host port, so reach it through the proxy, which routes `?sourceType=filesystem`
+to it and forwards your `Authorization` header unchanged:
+
+```bash
+curl -u "$FILESYSTEM_SYNC_USERNAME:$FILESYSTEM_SYNC_PASSWORD" \
+  -X POST 'http://localhost/api/sync/configured?sourceType=filesystem'
+```
+
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
 
 ```bash
@@ -329,7 +344,7 @@ Only the proxy is published on the host on port `80`.
 | `http://localhost/nuxeo/` | nuxeo, full, demo |
 | `http://localhost/api/rag/` | all profiles |
 | `http://localhost/api/content-lake/` | alfresco, full, demo |
-| `http://localhost/api/sync/` | all profiles (routes to alfresco or nuxeo ingester via `?sourceType=`) |
+| `http://localhost/api/sync/` | all profiles (routes to the alfresco, nuxeo or filesystem ingester via `?sourceType=`) |
 | `http://localhost:5601/` | alfresco, nuxeo, full, demo |
 
 ## Nuxeo Demo Content

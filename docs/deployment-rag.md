@@ -97,7 +97,10 @@ The authenticated username is then used to resolve the caller's group membership
 account) and build the `sys_racl` permission filter passed to hxpr. This ensures search results are
 scoped to documents the caller is actually allowed to read.
 
-`/api/rag/health` and `/actuator/**` are public (no credentials required).
+Only three paths are public: `/api/rag/health`, `/actuator/health` and `/actuator/info`. Every other
+path, including `/actuator/metrics` and `/actuator/prometheus`, requires credentials. Adding a route
+takes no security configuration to protect it; the chain denies by default, so a new endpoint is
+authenticated unless it is deliberately exempted.
 
 ### Unauthenticated requests
 
@@ -375,8 +378,16 @@ Metrics are exposed via Micrometer at `/actuator/prometheus`. Key metrics:
 - `search_results_count` -- results returned per query
 - `embedding_requests_total` -- embedding API calls
 
-Health: `/actuator/health` (public, no auth required).
+Health: `/actuator/health` (public, no auth required, so the container orchestrator can probe it).
 Info: `/actuator/info` (public).
+
+`/actuator/metrics` and `/actuator/prometheus` require credentials: they enumerate the service's
+endpoints and reveal request volumes and timings. A scraper needs an account valid in one of the
+configured content sources, the same as any other caller:
+
+```bash
+curl -u admin:admin http://localhost/actuator/prometheus
+```
 
 ### Distributed tracing
 

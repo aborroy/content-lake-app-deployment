@@ -124,12 +124,16 @@ repository module has published the queue message and `batch-ingester` has updat
 
 ## Triggering a Sync
 
+The proxy forwards the caller's own `Authorization` header to the ingester, which validates it
+against its source repository. It supplies no credentials of its own, so each call needs credentials
+valid in the repository behind the `?sourceType=` it routes to.
+
 ```bash
 # Alfresco full sync
 curl -u admin:admin -X POST 'http://localhost/api/sync/configured'
 
 # Nuxeo full sync (full/demo profiles only)
-curl -u admin:admin -X POST 'http://localhost/api/sync/configured?sourceType=nuxeo'
+curl -u Administrator:Administrator -X POST 'http://localhost/api/sync/configured?sourceType=nuxeo'
 ```
 
 ---

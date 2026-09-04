@@ -16,9 +16,11 @@ Tests are grouped into eight sections and should be executed in order.
 | Alfresco batch-ingester | `http://localhost/api/sync/configured` | `admin:admin` |
 | Alfresco live status | `http://localhost:9092/api/live/status` | -- (port not published by default) |
 | Nuxeo REST API | `http://localhost:8081/nuxeo/api/v1` | `Administrator:Administrator` |
-| Nuxeo batch-ingester | `http://localhost/api/sync/configured` | `admin:admin` |
-| Batch sync status | `http://localhost/api/sync/status` | `admin:admin` |
-| RAG service | `http://localhost/api/rag` | -- (permit-all in dev) |
+| Nuxeo batch-ingester | `http://localhost/api/sync/configured` | `Administrator:Administrator` |
+| Batch sync status | `http://localhost/api/sync/status` | credentials of whichever ingester the profile routes to |
+| RAG service | `http://localhost/api/rag` | `admin:admin` (or any account valid in a configured source) |
+| Health and info probes | `/actuator/health`, `/actuator/info` on any service | -- (public) |
+| Any other actuator path | `/actuator/metrics` on any service | same credentials as that service's API |
 
 > **Stack profile:** Use `make up-alfresco` for sections A-C and G (Alfresco).
 > Use `make up-nuxeo` for sections D-E (Nuxeo-only; also starts HXPR + RAG but not Alfresco services).
@@ -436,7 +438,7 @@ Expected: `202 Accepted`.
 ### D4 -- Poll sync status
 
 ```bash
-watch -n 10 "curl -s -u admin:admin http://localhost/api/sync/status/$NUX_JOB \
+watch -n 10 "curl -s -u Administrator:Administrator http://localhost/api/sync/status/$NUX_JOB \
   | jq '{status,discoveredCount,processedCount,errorCount}'"
 ```
 

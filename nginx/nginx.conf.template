@@ -23,16 +23,11 @@ http {
 
     # Route /api/sync to the appropriate batch-ingester.
     map $arg_sourceType $sync_backend {
-        default  ${NGINX_SYNC_DEFAULT_BACKEND};
-        ""       ${NGINX_SYNC_DEFAULT_BACKEND};
-        alfresco batch-ingester:9090;
-        nuxeo    nuxeo-batch-ingester:9093;
-    }
-
-    # Auto-inject Nuxeo Basic auth on /api/sync when no Authorization header present.
-    map "$arg_sourceType:$http_authorization" $sync_authorization {
-        default $http_authorization;
-        "nuxeo:" "Basic QWRtaW5pc3RyYXRvcjpBZG1pbmlzdHJhdG9y";
+        default    ${NGINX_SYNC_DEFAULT_BACKEND};
+        ""         ${NGINX_SYNC_DEFAULT_BACKEND};
+        alfresco   batch-ingester:9090;
+        nuxeo      nuxeo-batch-ingester:9093;
+        filesystem filesystem-batch-ingester:9095;
     }
 
     # ── HTTP server ─────────────────────────────────────────────────────────────
@@ -86,9 +81,10 @@ http {
             proxy_cache off;
         }
 
+        # The caller's own Authorization header is forwarded to the ingester, which authenticates it
+        # against the source repository. The proxy never supplies credentials of its own.
         location /api/sync {
             if ($sync_backend = "") { return 404; }
-            proxy_set_header Authorization $sync_authorization;
             proxy_pass http://$sync_backend;
         }
 
@@ -221,9 +217,10 @@ http {
             proxy_cache off;
         }
 
+        # The caller's own Authorization header is forwarded to the ingester, which authenticates it
+        # against the source repository. The proxy never supplies credentials of its own.
         location /api/sync {
             if ($sync_backend = "") { return 404; }
-            proxy_set_header Authorization $sync_authorization;
             proxy_pass http://$sync_backend;
         }
 

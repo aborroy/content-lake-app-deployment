@@ -8,7 +8,8 @@
 #   make up-demo            Full + standalone demo UI at /  (~24 services)
 #   Filesystem connector (opt-in): add the 'filesystem' profile to a base stack, e.g.
 #     docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester
-#     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured)
+#     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured
+#      with FILESYSTEM_SYNC_USERNAME/FILESYSTEM_SYNC_PASSWORD; both are required to start)
 #   make down               Stop all services
 #   make logs               Follow logs
 #   make ps                 Show service status
