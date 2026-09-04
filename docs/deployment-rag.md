@@ -271,8 +271,20 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
   repository. `fail-closed` excludes that source from the permission filter, so a directory outage
   narrows results; `degrade` proceeds with the caller's own name plus `GROUP_EVERYONE`, losing only
   group-granted documents. Both log at WARN, and an unrecognised value is read as `fail-closed`.
+- Administrator bypass: `RAG_SECURITY_ADMIN_BYPASS_ENABLED` decides whether a member of
+  `GROUP_ALFRESCO_ADMINISTRATORS` reads an Alfresco source with no `sys_racl` condition at all. The
+  application default is `false`, so an administrator is filtered by document ACLs like anyone else.
+  This stack sets it to `true`, because `admin:admin` is its working account and repository-admin
+  discoverability is part of what it demonstrates; set it to `false` for a deployment where
+  administrators must not see documents their own ACLs exclude. The bypass never applies to a Nuxeo
+  source, whatever this flag says.
 - User feedback capture: `RAG_FEEDBACK_ENABLED` (default **on**) exposes `POST/GET /api/rag/feedback`;
   `RAG_FEEDBACK_BASE_PATH` (default `/_feedback`) is the hxpr folder feedback is stored under.
+  `GET /api/rag/feedback` returns only the calling account's own ratings, since an entry holds a user's
+  question and the answer they were given. `?scope=all` returns every submitter's and is restricted to
+  the accounts in `RAG_FEEDBACK_OPERATOR_USERS` (comma-separated, empty in the application default,
+  `admin,Administrator` in this stack); anyone else gets 403. `cleval feedback import` uses that view,
+  so the credentials it runs with must appear in the list.
 - Named-query discovery: `RAG_NAMEDQUERY_DISCOVERY_ENABLED` (default **on**) controls whether
   `GET /api/rag/named-queries` lists the named queries registered in hxpr. The UI turns that list
   into a "Saved query" selector and hides the selector when the list is empty, so set it to `false`
@@ -362,6 +374,10 @@ or reject the credentials, a `401 Unauthorized` is returned.
 The service account credentials (`ALFRESCO_INTERNAL_USERNAME` / `ALFRESCO_INTERNAL_PASSWORD`,
 `NUXEO_USERNAME` / `NUXEO_PASSWORD`) are used only for internal operations (group membership
 lookups, metadata enrichment) -- they are never used to validate incoming requests.
+
+[`docs/security-model.md`](https://github.com/aborroy/content-lake-app/blob/main/docs/security-model.md)
+in `content-lake-app` is the full picture: which component enforces read access and why, what the model
+explicitly does not do, and a hardening checklist for a deployment reachable by anyone other than you.
 
 ---
 

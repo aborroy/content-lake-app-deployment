@@ -112,6 +112,21 @@ services:
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
       RAG_PERMISSION_SOURCE_IDS: ${RAG_PERMISSION_SOURCE_IDS:-}
+      # What happens when a caller's group membership cannot be read from a source repository.
+      # fail-closed (the application default) drops that source from the permission filter; degrade
+      # keeps the caller's own name plus GROUP_EVERYONE. Both log at WARN.
+      RAG_SECURITY_GROUP_RESOLUTION_FAILURE: ${RAG_SECURITY_GROUP_RESOLUTION_FAILURE:-fail-closed}
+      # Whether GROUP_ALFRESCO_ADMINISTRATORS reads an Alfresco source with no sys_racl condition at
+      # all. The application default is off, so an administrator is ACL-filtered like anyone else.
+      # This stack opts in: it is a demo where admin:admin is the working account, repository-admin
+      # discoverability is part of what it shows, and the ACL suite asserts it. A deployment that
+      # wants administrators subject to document ACLs sets this to false.
+      RAG_SECURITY_ADMIN_BYPASS_ENABLED: ${RAG_SECURITY_ADMIN_BYPASS_ENABLED:-true}
+      # Accounts allowed to read every submitter's feedback (GET /api/rag/feedback?scope=all). Everyone
+      # else reads only their own ratings. The application default is empty; this stack names the two
+      # repository admin accounts so `cleval feedback import`, which needs the whole corpus, works
+      # against it. Clear it for a deployment where no one aggregates feedback.
+      RAG_FEEDBACK_OPERATOR_USERS: ${RAG_FEEDBACK_OPERATOR_USERS:-admin,Administrator}
       HXPR_USERNAME: ${HXPR_USERNAME}
       HXPR_PASSWORD: ${HXPR_PASSWORD}
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
