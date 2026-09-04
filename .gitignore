@@ -1,5 +1,15 @@
 # Local environment overrides
 .env.local
+*.bak
+
+# Docker Compose auto-merges a file with this name into every command run from this
+# directory. Keep local service tweaks in .env.local instead, so a run's configuration
+# is visible in the compose files it names.
+compose.override.yaml
+compose.override.yml
+
+# Drop directory mounted by the opt-in filesystem profile (FILESYSTEM_HOST_PATH)
+filesystem-data/
 
 # macOS
 .DS_Store

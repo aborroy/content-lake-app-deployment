@@ -135,6 +135,9 @@ services:
       RAG_USE_HYBRID_SEARCH: ${RAG_USE_HYBRID_SEARCH:-true}
       # Persistent conversation summary (long-term memory), surfaced in the chat UI. On by default.
       RAG_CONVERSATION_SUMMARY_ENABLED: ${RAG_CONVERSATION_SUMMARY_ENABLED:-true}
+      # Citation faithfulness check: populates `verified` / `unsupportedClaims` on prompt responses.
+      # Off by default because it costs an extra generation call per answer.
+      RAG_CITATION_VERIFY_ENABLED: ${RAG_CITATION_VERIFY_ENABLED:-false}
       SEMANTIC_SEARCH_MIN_SCORE: ${SEMANTIC_SEARCH_MIN_SCORE:-0.2}
       # Retrieval tunables. `environment` is an explicit mapping, so a variable absent from this
       # block never reaches the container however it is set on the host: the service silently keeps
