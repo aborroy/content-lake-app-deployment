@@ -63,9 +63,14 @@ This is a clean-deploy design: on a fresh stack the indexer starts at "now" and 
 created while it runs -- no migration or reindex-from-Solr, no cursor seeding. The archive/trashcan
 search scope (`alfresco-archive`) is **not** implemented by the OpenSearch module.
 
-> OpenSearch `3.5.0` is above Alfresco's documented support matrix (OpenSearch 2.11.1 / ES 8.17.x).
-> It is used here for the dev/demo stack only; production should pin a supported version or run
-> separate clusters.
+> OpenSearch is pinned to `2.19.6` (`OPENSEARCH_TAG`), the version the hxpr reference stack uses
+> (`Hyland/ai-ready-index`, `server/hxpr-community-internal-app/docker-compose.yml`). That is still
+> a patch line above Alfresco's documented support matrix (OpenSearch 2.11.1 / ES 8.17.x) but within
+> the same major version; production should pin a supported version or run separate clusters.
+> Do not move this cluster to OpenSearch 3.x: 3.x enables `index.knn.derived_source` by default,
+> which strips vectors from `_source` and reconstructs them from the HNSW `.vec` files at fetch
+> time. After a segment merge those memory-mapped files can be `AlreadyClosed`, so hybrid
+> (knn + text) search fails the fetch phase with "all shards failed" and RAG surfaces a 500.
 
 Validate that both indices coexist once the stack is healthy:
 

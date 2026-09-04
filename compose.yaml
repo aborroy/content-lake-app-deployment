@@ -10,7 +10,6 @@ volumes:
   postgres-data:
   mongodb-data:
   opensearch-data:
-  localstack-data:
   nuxeo-live-audit-data:
 
 # ─── Build secrets ────────────────────────────────────────────────────────────
@@ -33,6 +32,10 @@ secrets:
 #   nuxeo     — Nuxeo source only
 #   full      — Alfresco + Nuxeo (core)
 #   demo      — full + standalone demo UI at /
+#
+# Opt-in profiles, added on top of one of the above:
+#   filesystem - filesystem-batch-ingester
+#   debug      - OpenSearch Dashboards on :5601
 
 include:
   - compose.alfresco.yaml

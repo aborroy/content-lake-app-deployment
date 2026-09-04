@@ -2,14 +2,17 @@
 # Content Lake — Deployment Makefile
 # =============================================================
 # Usage:
-#   make up-alfresco        Alfresco + HXPR + RAG + ACA UI  (~21 services)
-#   make up-nuxeo           Nuxeo + HXPR + RAG  (~14 services)
-#   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~23 services)
-#   make up-demo            Full + standalone demo UI at /  (~24 services)
+#   make up-alfresco        Alfresco + HXPR + RAG + ACA UI  (~14 services)
+#   make up-nuxeo           Nuxeo + HXPR + RAG  (~9 services, 2 from ../nuxeo-deployment)
+#   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~18 services)
+#   make up-demo            Full + standalone demo UI at /  (~19 services)
 #   Filesystem connector (opt-in): add the 'filesystem' profile to a base stack, e.g.
 #     docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester
 #     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured
 #      with FILESYSTEM_SYNC_USERNAME/FILESYSTEM_SYNC_PASSWORD; both are required to start)
+#   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
+#     docker compose --profile demo --profile debug up -d opensearch-dashboards
+#     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)
 #   make down               Stop all services
 #   make logs               Follow logs
 #   make ps                 Show service status

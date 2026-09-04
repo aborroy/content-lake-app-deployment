@@ -369,9 +369,7 @@ flowchart LR
     HxprApp["hxpr-app"]
     Mongo["mongodb"]
     OpenSearch["opensearch"]
-    OSD["opensearch-dashboards"]
-    Localstack["localstack"]
-    Mockoon["mockoon"]
+    OSD["opensearch-dashboards (debug)"]
   end
 
   AiProxy --> TEI
@@ -429,8 +427,6 @@ flowchart LR
 
   HxprApp --> Mongo
   HxprApp --> OpenSearch
-  HxprApp --> Localstack
-  HxprApp --> Mockoon
 
 ```
 

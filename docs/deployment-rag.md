@@ -97,6 +97,20 @@ The authenticated username is then used to resolve the caller's group membership
 account) and build the `sys_racl` permission filter passed to hxpr. This ensures search results are
 scoped to documents the caller is actually allowed to read.
 
+That filter is built by a single class, `AclFilterBuilder` in `content-lake-core`, which both the
+semantic and the hybrid search path call. rag-service connects to hxpr as one administrator service
+account, so hxpr applies no ACL filter of its own and this predicate is the only thing scoping
+results: the hxpr port must therefore never be reachable by end users or agents, who would otherwise
+query it directly with no filter at all. When no permission source can be resolved for a caller the
+predicate matches nothing rather than everything.
+
+Neither input to that filter has a permissive fallback. A request that reaches a search endpoint with
+no authenticated principal is rejected with 401 rather than answered under a placeholder name, and a
+source whose group directory is unreachable is handled according to
+`RAG_SECURITY_GROUP_RESOLUTION_FAILURE` (described with the other environment flags below). The worst outcome of
+either failure is a caller seeing fewer documents than they should, together with a WARN in the
+rag-service log.
+
 Only three paths are public: `/api/rag/health`, `/actuator/health` and `/actuator/info`. Every other
 path, including `/actuator/metrics` and `/actuator/prometheus`, requires credentials. Adding a route
 takes no security configuration to protect it; the chain denies by default, so a new endpoint is
@@ -252,6 +266,11 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
   so a cached answer is never served across ACL contexts; the TTL bounds how stale a principal's
   group membership may be. Hit-rate is exposed as `cache.gets{cache=rag.query.results}` /
   `{cache=rag.query.embeddings}` under `/actuator/metrics`.
+- Group-resolution failure policy: `RAG_SECURITY_GROUP_RESOLUTION_FAILURE` (default `fail-closed`)
+  decides what a query does when the caller's group membership cannot be read from a source
+  repository. `fail-closed` excludes that source from the permission filter, so a directory outage
+  narrows results; `degrade` proceeds with the caller's own name plus `GROUP_EVERYONE`, losing only
+  group-granted documents. Both log at WARN, and an unrecognised value is read as `fail-closed`.
 - User feedback capture: `RAG_FEEDBACK_ENABLED` (default **on**) exposes `POST/GET /api/rag/feedback`;
   `RAG_FEEDBACK_BASE_PATH` (default `/_feedback`) is the hxpr folder feedback is stored under.
 - Named-query discovery: `RAG_NAMEDQUERY_DISCOVERY_ENABLED` (default **on**) controls whether

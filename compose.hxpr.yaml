@@ -1,6 +1,9 @@
-# compose.hxpr.yaml — HXPR platform services
+# compose.hxpr.yaml - HXPR platform services
 # Part of the content-lake-app stack; loaded via include: in compose.yaml.
-# Profiles: alfresco, nuxeo, full, demo
+# Profiles: alfresco, nuxeo, full, demo (opensearch-dashboards: debug)
+#
+# The hxpr community app needs MongoDB and OpenSearch only, matching the reference stack in
+# Hyland/ai-ready-index (server/hxpr-community-internal-app/docker-compose.yml).
 
 services:
 
@@ -22,7 +25,7 @@ services:
 
   opensearch:
     profiles: [alfresco, nuxeo, full, demo]
-    image: opensearchproject/opensearch:${OPENSEARCH_TAG:-3.5.0}
+    image: opensearchproject/opensearch:${OPENSEARCH_TAG:-2.19.6}
     restart: unless-stopped
     hostname: opensearch
     environment:
@@ -43,72 +46,17 @@ services:
     networks:
       - stack
 
-  # One-shot: registers the nuxeo_embeddings index template (disables OpenSearch 3.5
-  # derived_source to avoid the HNSW AlreadyClosed fetch bug) before hxpr-app creates
-  # the index. Exits 0 when done; hxpr-app waits on it via depends_on.
-  opensearch-init:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: curlimages/curl:${CURL_TAG:-8.11.1}
-    restart: "no"
-    entrypoint: ["sh", "/init/init.sh"]
-    environment:
-      OPENSEARCH_URL: http://opensearch:9200
-    volumes:
-      - ./hxpr/opensearch/init.sh:/init/init.sh:ro
-      - ./hxpr/opensearch/index-template.json:/init/index-template.json:ro
-    depends_on:
-      opensearch:
-        condition: service_healthy
-    networks:
-      - stack
-
+  # Debugging UI for the OpenSearch cluster, opt-in and unauthenticated (the security plugin is
+  # disabled), with read/write access to both the alfresco* and nuxeo_embeddings* indices. Not part
+  # of any default stack: add --profile debug on top of a running stack to start it.
   opensearch-dashboards:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: opensearchproject/opensearch-dashboards:${OPENSEARCH_TAG:-3.5.0}
+    profiles: [debug]
+    image: opensearchproject/opensearch-dashboards:${OPENSEARCH_TAG:-2.19.6}
     ports:
       - "5601:5601"
     environment:
       OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
       DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
-    networks:
-      - stack
-
-  localstack:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: localstack/localstack:${LOCALSTACK_TAG:-4.13.1}
-    restart: unless-stopped
-    environment:
-      SERVICES: s3,sts,sqs,sns,secretsmanager
-      DISABLE_CORS_CHECKS: "1"
-      DEFAULT_REGION: us-east-1
-      LOCALSTACK_HOST: localstack
-      PERSISTENCE: "1"
-    volumes:
-      - localstack-data:/var/lib/localstack
-      - ./hxpr/localstack/init.sh:/etc/localstack/init/ready.d/01-hxpr-init.sh:ro
-      - ./localstack/init-additional.sh:/etc/localstack/init/ready.d/02-additional-init.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "awslocal sqs list-queues > /dev/null 2>&1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
-    networks:
-      - stack
-
-  mockoon:
-    profiles: [alfresco, nuxeo, full, demo]
-    image: mockoon/cli:${MOCKOON_TAG:-9.3.0}
-    hostname: mockoon
-    volumes:
-      - ./hxpr/system-integrations-mock/system-integrations-mockoon.json:/data:ro
-    command: --data data --port 3002
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/ > /dev/null 2>&1 || exit 0"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     networks:
       - stack
 
@@ -135,35 +83,13 @@ services:
         - source: nexus_password
           target: nexus_password
     environment:
-      JAVA_OPTIONS: >-
-        -Dnuxeo.mongodb.server=mongodb:27017
-        -Dnuxeo.aws.accessKeyId=000000000000
-        -Dnuxeo.aws.secretAccessKey=000000000000
-        -Dnuxeo.aws.region=us-east-1
-        -Dnuxeo.aws.endpoint=http://localstack:4566
-        -Dnuxeo.aws.sns.topic.arn=arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
+      JAVA_OPTIONS: -Dnuxeo.mongodb.server=mongodb:27017
       NUXEO_MONGODB_SERVER: mongodb:27017
       OPENSEARCH_ADDRESSLIST: http://opensearch:9200
-      NUCLEUS_URL: http://mockoon:3002
-      ENV_ID: localenv
-      HXTS_REPLY_TO: localapp
-      NUXEO_AWS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:hxpr-repository-events-standard
-      NUXEO_AWS_ENDPOINT: http://localstack:4566
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      AWS_DEFAULT_REGION: us-east-1
-      AWS_SNS_ENDPOINT: http://localstack:4566
-      AWS_SQS_ENDPOINT: http://localstack:4566
     depends_on:
       mongodb:
         condition: service_healthy
       opensearch:
-        condition: service_healthy
-      opensearch-init:
-        condition: service_completed_successfully
-      localstack:
-        condition: service_healthy
-      mockoon:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q UP || exit 1"]

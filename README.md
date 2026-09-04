@@ -33,10 +33,10 @@ The setup script handles everything for a first run. For manual control see [Fir
 The stack supports four source profiles. Start with `alfresco` if you only have Alfresco:
 
 ```bash
-make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~17 services)
-make up-nuxeo          # Nuxeo + HXPR + RAG  (~10 services)
-make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~19 services)
-make up-demo           # full + standalone demo UI at /  (~20 services)
+make up-alfresco       # Alfresco + HXPR + RAG + ACA UI  (~14 services)
+make up-nuxeo          # Nuxeo + HXPR + RAG  (~9 services, 2 from ../nuxeo-deployment)
+make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~18 services)
+make up-demo           # full + standalone demo UI at /  (~19 services)
 ```
 
 The `filesystem-batch-ingester` is an opt-in connector in its own `filesystem` profile (kept out of
@@ -83,7 +83,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 |---|---|
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
-| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, localstack, mockoon, opensearch-dashboards\* |
+| [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, opensearch-dashboards (`debug` profile) |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 
@@ -135,9 +135,7 @@ flowchart LR
     HxprApp["hxpr-app"]
     Mongo["mongodb"]
     OpenSearch["opensearch"]
-    OSD["opensearch-dashboards"]
-    Localstack["localstack"]
-    Mockoon["mockoon"]
+    OSD["opensearch-dashboards (debug)"]
   end
 
   Browser --> Proxy
@@ -192,8 +190,6 @@ flowchart LR
 
   HxprApp --> Mongo
   HxprApp --> OpenSearch
-  HxprApp --> Localstack
-  HxprApp --> Mockoon
 
 ```
 
@@ -205,7 +201,13 @@ Notes:
 - In `demo` profile, `content-lake-app-ui` serves `/` and ACA remains at `/aca/`.
 - In `nuxeo` profile, `/` redirects to `/nuxeo/`.
 - The Nuxeo routes are active in `nuxeo`, `full`, and `demo` profiles, and require `../nuxeo-deployment` to be running.
-- `opensearch-dashboards` is published separately on port `5601`, not through `proxy`.
+- `opensearch-dashboards` is opt-in (`debug` profile) and published on port `5601`, not through
+  `proxy`. It is unauthenticated, so keep it off unless you are debugging locally:
+  `docker compose --profile demo --profile debug up -d opensearch-dashboards`.
+- hxpr needs only `mongodb` and `opensearch`, matching the reference stack in
+  `Hyland/ai-ready-index` (`server/hxpr-community-internal-app/docker-compose.yml`). The community
+  app runs async tasks in memory and stores blobs locally, so there is no LocalStack (S3/SNS/SQS)
+  or Nucleus mock in this stack.
 - Alfresco and hxpr share the single `opensearch` cluster as two independent indices: `alfresco*`
   (repository search, fed by `batch-indexer`) and `nuxeo_embeddings*` (hxpr semantic search). There
   are no cross-index reads. On a clean deploy the batch indexer starts at "now" and indexes content
@@ -281,6 +283,23 @@ them if the build fails resolving a private artifact from the `hylandsoftware-re
 (`https://artifacts.alfresco.com/nexus/content/repositories/hylandsoftware-releases`). When unset,
 the build proceeds anonymously.
 
+### Credentials committed to this repository
+
+Every credential in the tracked `.env` is a local development default and is world-readable, so this
+stack is safe to run on a laptop and not safe to expose. Before putting it on any host reachable by
+someone else, change at least these:
+
+| Key | Committed default | Why it matters |
+|---|---|---|
+| `ALFRESCO_ADMIN_PASSWORD`, `HXPR_PASSWORD`, `NUXEO_PASSWORD` | vendor defaults (`admin`, `password`, `Administrator`) | administrator on the repository and on the engine |
+| `OPENSEARCH_ADMIN_PASSWORD` | a fixed value that satisfies the OpenSearch password policy | looks like a real password but is published here |
+| `SHARED_SECRET` | a fixed string | the Alfresco to Solr shared secret; anyone holding it can talk to Solr as the repository |
+| `POSTGRES_PASSWORD`, `ACTIVEMQ_PASSWORD` | vendor defaults | direct database and broker access |
+
+`FILESYSTEM_SYNC_USERNAME` and `FILESYSTEM_SYNC_PASSWORD` are deliberately the exception: they ship
+empty and the service refuses to start until you supply them, because the endpoint they guard
+triggers a full re-ingest. Put overrides for any of the above in `.env.local`, which is not tracked.
+
 ## First Run
 
 1. Authenticate to GitHub Container Registry:
@@ -345,7 +364,7 @@ Only the proxy is published on the host on port `80`.
 | `http://localhost/api/rag/` | all profiles |
 | `http://localhost/api/content-lake/` | alfresco, full, demo |
 | `http://localhost/api/sync/` | all profiles (routes to the alfresco, nuxeo or filesystem ingester via `?sourceType=`) |
-| `http://localhost:5601/` | alfresco, nuxeo, full, demo |
+| `http://localhost:5601/` | OpenSearch Dashboards, `debug` profile only (opt-in, unauthenticated) |
 
 ## Nuxeo Demo Content
 
