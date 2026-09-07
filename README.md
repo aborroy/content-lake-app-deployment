@@ -527,6 +527,9 @@ See [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) for a step-by-step guide to running
 - The repository model is injected directly into the Alfresco image from this repo.
 - The ACA UI is exposed at `/aca/` in every profile where it is enabled, so its context path stays stable across stacks.
 - The demo UI (`content-lake-app-ui`) is served at `/` only in the `demo` profile.
+- The demo UI is a demonstration, not a reference authentication implementation. It persists the
+  Alfresco ticket (revocable) but holds the Nuxeo `base64(user:pass)` credential in memory only, so
+  reloading the page keeps the Alfresco session and ends the Nuxeo one.
 
 ## Known Assumption
 
