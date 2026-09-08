@@ -36,6 +36,10 @@ RAG_URL="${BASE}/api/rag"
 # inference backends can extend it without editing the suite.
 POLL_DEADLINE_S="${POLL_DEADLINE_S:-180}"
 LIVE_URL="http://${HOST}:9092/api/live/status"   # direct port — may not be exposed
+# Deployment root, so a section that needs to stop a service can reach docker compose. run-tests.sh
+# does not export its own DEPLOY_DIR, and this suite is also run standalone.
+DEPLOY_DIR="${DEPLOY_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+LAST_SYNC_JOB_ID=""
 
 PASS=0; FAIL=0
 TMPDIR_DATA="$(mktemp -d)"
@@ -46,6 +50,7 @@ G='\033[0;32m'; R='\033[0;31m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[1m'; N='
 pass()    { printf "${G}[PASS]${N} %s\n" "$*"; PASS=$((PASS+1)); }
 fail()    { printf "${R}[FAIL]${N} %s\n" "$*"; FAIL=$((FAIL+1)); }
 info()    { printf "${C}[INFO]${N} %s\n" "$*"; }
+warn()    { printf "${Y}[WARN]${N} %s\n" "$*"; }
 section() { printf "\n${B}${C}─── %s ───${N}\n" "$*"; }
 
 cleanup() { rm -rf "$TMPDIR_DATA"; }
@@ -105,7 +110,7 @@ upload_file() {
 # after upload returns 201. Syncing before Solr catches up discovers 0 nodes and completes
 # empty. Poll an AFTS PARENT query until the expected child count is visible (up to ~3 min).
 wait_for_solr_indexed() {
-  local folder_id="$1" expected="$2" elapsed=0 found
+  local folder_id="$1" expected="$2" tid="${3:-B3a}" elapsed=0 found
   local search_url="${BASE}/alfresco/api/-default-/public/search/versions/1/search"
   while [ $elapsed -lt 180 ]; do
     found=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST \
@@ -114,20 +119,23 @@ wait_for_solr_indexed() {
       -d "{\"query\":{\"language\":\"afts\",\"query\":\"PARENT:'workspace://SpacesStore/$folder_id' AND TYPE:'cm:content'\"},\"paging\":{\"maxItems\":100}}" \
       2>/dev/null | jq -r '.list.pagination.totalItems // 0' 2>/dev/null || echo 0)
     if [ "${found:-0}" -ge "$expected" ]; then
-      pass "B3a: Solr indexed $found/$expected uploaded files (ready to sync)"
+      pass "$tid: Solr indexed $found/$expected uploaded files (ready to sync)"
       return 0
     fi
     sleep 10; elapsed=$((elapsed+10))
   done
-  info "B3a: Solr showed only $found/$expected files after 3 min; syncing anyway"
+  info "$tid: Solr showed only $found/$expected files after 3 min; syncing anyway"
   return 0
 }
 
-# run_sync_wait <folder_node_id>
+# run_sync_wait <folder_node_id> [trigger_label] [wait_label]
 # Triggers /api/sync/batch with an explicit folder and waits up to 5 min for COMPLETED.
+# Sets LAST_SYNC_JOB_ID so a caller can read the job's own report (e.g. the reconciliation
+# outcome) afterwards.
 run_sync_wait() {
-  local folder_id="$1"
+  local folder_id="$1" trigger_label="${2:-B3}" wait_label="${3:-B4}"
   local resp job_id status processed
+  LAST_SYNC_JOB_ID=""
   resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
     -H 'Content-Type: application/json' \
     -d "{\"folders\":[\"$folder_id\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
@@ -135,10 +143,11 @@ run_sync_wait() {
   job_id=$(echo "$resp" | jq -r '.jobId // empty')
 
   if [ -z "$job_id" ]; then
-    fail "B3: Sync trigger returned no jobId (response: $resp)"
+    fail "$trigger_label: Sync trigger returned no jobId (response: $resp)"
     return 1
   fi
-  pass "B3: Sync triggered — jobId=$job_id"
+  LAST_SYNC_JOB_ID="$job_id"
+  pass "$trigger_label: Sync triggered — jobId=$job_id"
 
   local elapsed=0
   while [ $elapsed -lt 300 ]; do
@@ -148,17 +157,17 @@ run_sync_wait() {
     case "$status" in
       COMPLETED)
         processed=$(echo "$sr" | jq -r '.metadataIngestedCount // .processedCount // "?"')
-        pass "B4: Sync COMPLETED (metadataIngestedCount=$processed)"
+        pass "$wait_label: Sync COMPLETED (metadataIngestedCount=$processed)"
         return 0
         ;;
       FAILED|ERROR)
-        fail "B4: Sync job FAILED — $(echo "$sr" | jq -c '{status,failedCount,discoveredCount}')"
+        fail "$wait_label: Sync job FAILED — $(echo "$sr" | jq -c '{status,failedCount,discoveredCount}')"
         return 1
         ;;
     esac
     sleep 10; elapsed=$((elapsed+10))
   done
-  fail "B4: Sync job timed out after 5 min (last status=$status)"
+  fail "$wait_label: Sync job timed out after 5 min (last status=$status)"
   return 1
 }
 
@@ -182,6 +191,24 @@ rag_find_node() {
 
 # wait_for_node_present <query> <node_id> <test_id> <label> [auth]
 # Polls semantic search until the node is retrievable, up to a deadline, then emits the pass/fail.
+# index_proof <node_id> [sample_size]
+# Measured evidence that a node is retrievable, as opposed to the syncStatus a writer recorded: a
+# document present with zero embeddings reports INDEXED while being invisible to search. Returns the
+# JSON body, or {} on any failure. nginx routes /api/content-lake to the Alfresco batch ingester
+# specifically (no ?sourceType fan-out), so this is Alfresco-only through the proxy.
+index_proof() {
+  local node_id="$1" sample="${2:-3}"
+  curl -sf $CURL_OPTS -u "$ALF_AUTH" \
+    "$BASE/api/content-lake/nodes/${node_id}/index-proof?sampleSize=${sample}" 2>/dev/null || echo '{}'
+}
+
+# index_proof_chunk_count <node_id>
+# The document's stored chunk count from the embeddings index. Prints 0 when the measurement
+# degraded, so a caller comparing two counts should also check the count is non-zero to begin with.
+index_proof_chunk_count() {
+  index_proof "$1" 1 | jq -r '.measured.chunkCount // 0' 2>/dev/null || echo 0
+}
+
 # Replaces flat post-sync sleeps before single-shot presence assertions: embeddings and indexed
 # ACLs settle a variable time after sync, so a fixed sleep is inherently flaky. [auth] defaults to
 # admin; pass "user:password" for a per-user (ACL-scoped) presence check.
@@ -738,15 +765,20 @@ wait_for_node_present "product roadmap Q3 delivery mobile first strategy"  "$ROA
 wait_for_node_present "REST API endpoint HTTP authentication token"        "$TECH_ID" "B8" "technical-spec.txt (Engineering)"
 wait_for_node_present "fiscal year total revenue gross profit EBITDA"      "$LONG_ID" "B9" "long-report.txt (Finance)"
 
-# B10: Idempotency — re-run same sync, verify chunk count does not grow
-# Captures count BEFORE second sync, then after; passes if count is unchanged.
-if [ -n "${TXT_ID:-}" ]; then
-  resp_before=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
-    -H 'Content-Type: application/json' \
-    -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
-  count_before=$(echo "$resp_before" | jq --arg id "$TXT_ID" \
-    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
-  info "Re-running sync for idempotency check (pre-sync count=$count_before) …"
+# B10: Idempotency - re-run same sync, verify the chunk count does not grow.
+#
+# The count comes from the index-proof endpoint, which aggregates the embeddings index. It used to
+# count semantic-search hits above minScore, which is a proxy for the chunk count rather than the
+# chunk count: it is bounded by topK, it moves when relevance scoring changes, and it cannot see a
+# chunk that scores below the threshold. index-proof measures the stored chunks directly.
+#
+# Uses long-report.txt rather than short-memo.txt. short-memo is one of the two documents issue #100
+# reports as not embedded after a first sync, so its count starts at 0 and rises as embedding
+# eventually completes: against that document a "count did not grow" assertion tests #100, not
+# idempotency. long-report is the largest fixture and B9 has already proven it retrievable.
+if [ -n "${LONG_ID:-}" ]; then
+  count_before=$(index_proof_chunk_count "$LONG_ID")
+  info "Re-running sync for idempotency check (pre-sync chunkCount=$count_before) …"
   resp2=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/batch" \
     -H 'Content-Type: application/json' \
     -d "{\"folders\":[\"$FOLDER_ID\"],\"recursive\":true,\"types\":[\"cm:content\"]}" \
@@ -756,16 +788,77 @@ if [ -n "${TXT_ID:-}" ]; then
     info "Second sync job: $job2 — waiting for completion …"
     wait_job_complete "$job2" || warn "second sync job did not reach COMPLETED before deadline"
   fi
-  resp_after=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$RAG_URL/search/semantic" \
-    -H 'Content-Type: application/json' \
-    -d '{"query":"remote work eligibility work from home","topK":20,"minScore":0.2}' 2>/dev/null || echo '{}')
-  count_after=$(echo "$resp_after" | jq --arg id "$TXT_ID" \
-    '[.results[]? | select(.sourceDocument.nodeId == $id)] | length' 2>/dev/null || echo 0)
-  if [ "${count_after:-0}" -le "${count_before:-0}" ]; then
-    pass "B10: Idempotency — chunk count unchanged after re-sync (count=$count_after, no duplicates added)"
-  else
-    fail "B10: Idempotency — chunk count grew from $count_before to $count_after after re-sync (possible duplicates)"
+  count_after=$(index_proof_chunk_count "$LONG_ID")
+  if [ "${count_before:-0}" -eq 0 ]; then
+    warn "B10: pre-sync chunkCount was 0, so the idempotency comparison proves nothing"
   fi
+  if [ "${count_after:-0}" -le "${count_before:-0}" ]; then
+    pass "B10: Idempotency - stored chunk count unchanged after re-sync (chunkCount=$count_after)"
+  else
+    fail "B10: Idempotency - stored chunk count grew from $count_before to $count_after after re-sync (duplicates)"
+  fi
+fi
+
+# B11: index-proof reports a fully indexed document as INDEXED_WITH_EMBEDDINGS, measured rather than
+# claimed. contentLake_syncStatus=INDEXED does not imply retrievability, so the verdict has to come
+# from the chunk count.
+if [ -n "${LONG_ID:-}" ]; then
+  proof=$(index_proof "$LONG_ID")
+  verdict=$(echo "$proof" | jq -r '.verdict // empty')
+  chunks=$(echo "$proof" | jq -r '.measured.chunkCount // 0')
+  types=$(echo "$proof" | jq -r '.measured.embeddingTypes | length')
+  if [ "$verdict" = "INDEXED_WITH_EMBEDDINGS" ] && [ "${chunks:-0}" -gt 0 ]; then
+    pass "B11: index-proof verdict INDEXED_WITH_EMBEDDINGS (chunkCount=$chunks, embeddingTypes=$types)"
+  else
+    fail "B11: index-proof verdict is '$verdict' with chunkCount=$chunks (expected INDEXED_WITH_EMBEDDINGS)"
+  fi
+fi
+
+# B12: exactly one embedding type per document. Two types means a child from a previously configured
+# embedding model survived a re-sync and is still answering queries through the '*' wildcard.
+if [ -n "${LONG_ID:-}" ]; then
+  proof=$(index_proof "$LONG_ID")
+  type_count=$(echo "$proof" | jq -r '.measured.embeddingTypes | length')
+  type_list=$(echo "$proof" | jq -r '.measured.embeddingTypes | join(",")')
+  if [ "${type_count:-0}" -eq 1 ]; then
+    pass "B12: exactly one embedding type present ($type_list), no orphan from a retired model"
+  else
+    fail "B12: $type_count embedding types present ($type_list); expected exactly 1"
+  fi
+fi
+
+# B13: an unknown node id is ABSENT, not an error and not a guess.
+proof=$(index_proof "00000000-0000-0000-0000-000000000000")
+verdict=$(echo "$proof" | jq -r '.verdict // empty')
+if [ "$verdict" = "ABSENT" ]; then
+  pass "B13: index-proof reports ABSENT for an unknown node id"
+else
+  fail "B13: index-proof verdict for an unknown node id is '$verdict' (expected ABSENT)"
+fi
+
+# B14: the verdict that motivates this endpoint. A document present with zero embeddings reports
+# contentLake_syncStatus=INDEXED while being invisible to search, which is the #100 symptom; the
+# endpoint must be able to say METADATA_ONLY and show the measured count disagreeing with the claim.
+# Reported rather than asserted as a failure: whether any fixture is in that state on a given run
+# depends on #100, and this section is not the place to gate on it.
+if [ -n "${TXT_ID:-}" ]; then
+  proof=$(index_proof "$TXT_ID")
+  verdict=$(echo "$proof" | jq -r '.verdict // empty')
+  chunks=$(echo "$proof" | jq -r '.measured.chunkCount // "null"')
+  claimed=$(echo "$proof" | jq -r '.claimed.syncStatus // "null"')
+  section_chunks=$(echo "$proof" | jq -r '.claimed.sectionMapChunks // "null"')
+  case "$verdict" in
+    METADATA_ONLY)
+      pass "B14: index-proof reports METADATA_ONLY for short-memo.txt (measured chunkCount=$chunks vs claimed syncStatus=$claimed, sectionMapChunks=$section_chunks) -- the #100 state, correctly measured"
+      ;;
+    INDEXED_WITH_EMBEDDINGS)
+      info "B14: short-memo.txt is embedded on this run (chunkCount=$chunks), so the METADATA_ONLY path was not exercised"
+      pass "B14: index-proof reports a measured verdict for short-memo.txt ($verdict)"
+      ;;
+    *)
+      fail "B14: index-proof returned verdict '$verdict' for short-memo.txt (expected a measured verdict)"
+      ;;
+  esac
 fi
 
 fi  # end FOLDER_ID != NONE block
@@ -1291,6 +1384,141 @@ rag_absent_node "zephyr-cobalt-lambda-22r level two excluded"           "$DOC_L2
 rag_absent_node "zephyr-cobalt-lambda-33r level three ancestor-excluded" "$DOC_L3_ID" "I8b" "hier-doc-l3.txt (level3 — ancestor excluded)"
 
 fi  # end HIER_ROOT_ID != NONE block
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION J - Deletion Reconciliation
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deletion otherwise depends entirely on a delete event arriving. With the live ingester stopped, a
+# node removed from Alfresco outlives its source in the index and search returns it as a phantom
+# result, with nothing to notice. A batch sync must reconcile the index against what its discovery
+# pass actually saw.
+#
+# The live ingester is stopped for the whole window on purpose: with it running, the delete event
+# would remove the document and the test would pass without the sweep existing at all.
+section "J - Deletion Reconciliation (live ingester stopped)"
+
+J_FOLDER_ID=""
+J_STAMP="$(date +%Y%m%d-%H%M%S)-$$"
+J_LIVE_STOPPED=0
+
+# Restore the live ingester however this section exits. run-tests.sh wipes volumes between phases,
+# not within one, so leaving it stopped would silently break every later section in this phase.
+j_restore_live_ingester() {
+  if [ "$J_LIVE_STOPPED" -eq 1 ]; then
+    info "J: restarting live-ingester"
+    (cd "$DEPLOY_DIR" 2>/dev/null && docker compose --profile alfresco start live-ingester >/dev/null 2>&1) \
+      || warn "J: could not restart live-ingester; later live-ingestion assertions may fail"
+    J_LIVE_STOPPED=0
+    sleep 10
+  fi
+}
+trap 'j_restore_live_ingester; cleanup' EXIT
+
+J_FOLDER_ID=$(create_folder "-my-" "recon-test-$J_STAMP")
+if [ -z "$J_FOLDER_ID" ]; then
+  fail "J0: could not create the reconciliation test folder -- skipping section J"
+else
+  pass "J0: reconciliation test folder created (nodeId=$J_FOLDER_ID)"
+
+  # Three documents with distinct sentinels. Two survive; one is deleted at the source. The two
+  # survivors are the negative control: without them the section would pass on a sweep that deletes
+  # everything, which is the failure mode that matters most here.
+  for tag in alpha bravo charlie; do
+    printf 'Reconciliation fixture. Sentinel: reconsentinel-%s-%s.\n' "$tag" "$J_STAMP" \
+      > "$TMPDIR_DATA/recon-$tag.txt"
+    printf 'This document exists to verify that a batch sync deletes only what the source removed.\n' \
+      >> "$TMPDIR_DATA/recon-$tag.txt"
+  done
+
+  J_ALPHA_ID=$(upload_file "$J_FOLDER_ID" "$TMPDIR_DATA/recon-alpha.txt" "recon-alpha.txt" "text/plain")
+  J_BRAVO_ID=$(upload_file "$J_FOLDER_ID" "$TMPDIR_DATA/recon-bravo.txt" "recon-bravo.txt" "text/plain")
+  J_CHARLIE_ID=$(upload_file "$J_FOLDER_ID" "$TMPDIR_DATA/recon-charlie.txt" "recon-charlie.txt" "text/plain")
+
+  if [ -z "$J_ALPHA_ID" ] || [ -z "$J_BRAVO_ID" ] || [ -z "$J_CHARLIE_ID" ]; then
+    fail "J1: could not upload all three reconciliation fixtures -- skipping the rest of section J"
+  else
+    pass "J1: three reconciliation fixtures uploaded"
+
+    wait_for_solr_indexed "$J_FOLDER_ID" 3 "J1a"
+
+    if run_sync_wait "$J_FOLDER_ID" "J2a" "J2b"; then
+      pass "J2: initial sync of the reconciliation folder completed"
+    else
+      fail "J2: initial sync of the reconciliation folder did not complete"
+    fi
+
+    wait_for_node_present "reconsentinel-alpha-$J_STAMP"   "$J_ALPHA_ID"   "J3a" "recon-alpha.txt"
+    wait_for_node_present "reconsentinel-bravo-$J_STAMP"   "$J_BRAVO_ID"   "J3b" "recon-bravo.txt"
+    wait_for_node_present "reconsentinel-charlie-$J_STAMP" "$J_CHARLIE_ID" "J3c" "recon-charlie.txt"
+
+    # Stop the live ingester so no delete event can reach hxpr. Everything from here on is the
+    # batch sweep's work.
+    info "J: stopping live-ingester so no delete event can reach hxpr"
+    if (cd "$DEPLOY_DIR" 2>/dev/null && docker compose --profile alfresco stop live-ingester >/dev/null 2>&1); then
+      J_LIVE_STOPPED=1
+      pass "J4: live-ingester stopped"
+    else
+      warn "J4: could not stop live-ingester; the sweep result below may be attributable to the event path"
+    fi
+
+    # Delete bravo at the source, permanently so it does not linger in the trash.
+    code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
+      "$ALF_BASE/nodes/$J_BRAVO_ID?permanent=true" 2>/dev/null || echo 000)
+    if [ "$code" = "204" ]; then
+      pass "J5: recon-bravo.txt deleted from Alfresco (HTTP $code)"
+    else
+      fail "J5: deleting recon-bravo.txt returned HTTP $code (expected 204)"
+    fi
+
+    # Wait until Alfresco itself stops returning it, then until the search index agrees: discovery
+    # runs an AFTS descendant query, so a sweep run before the index catches up would see bravo as
+    # still present and delete nothing.
+    elapsed=0
+    while [ $elapsed -lt 60 ]; do
+      code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
+        "$ALF_BASE/nodes/$J_BRAVO_ID" 2>/dev/null || echo 404)
+      [ "$code" = "404" ] && break
+      sleep 5; elapsed=$((elapsed + 5))
+    done
+    wait_for_solr_indexed "$J_FOLDER_ID" 2 "J5a"
+
+    # Re-sync. This is the pass whose discovery will not see bravo.
+    if run_sync_wait "$J_FOLDER_ID" "J6a" "J6b"; then
+      pass "J6: reconciling sync completed"
+    else
+      fail "J6: reconciling sync did not complete"
+    fi
+
+    # The sweep's own report, read off the job. A bare "the document is gone" assertion would also
+    # pass if something else removed it, so assert the sweep says it did the deleting.
+    recon=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" "$SYNC_URL/status/$LAST_SYNC_JOB_ID" 2>/dev/null \
+      | jq -c '.reconciliation // {}' 2>/dev/null || echo '{}')
+    recon_status=$(echo "$recon" | jq -r '.status // empty')
+    recon_deleted=$(echo "$recon" | jq -r '.deleted // 0')
+    if [ "$recon_status" = "COMPLETED" ] && [ "${recon_deleted:-0}" -ge 1 ]; then
+      pass "J7: sweep reports status=COMPLETED deleted=$recon_deleted"
+    else
+      fail "J7: sweep reports $recon (expected status=COMPLETED with deleted>=1)"
+    fi
+
+    # The deleted document is gone from the index.
+    rag_absent_node "reconsentinel-bravo-$J_STAMP" "$J_BRAVO_ID" "J8" "recon-bravo.txt (deleted at source)"
+
+    # The negative control: the sweep must not have taken the other two with it.
+    wait_for_node_present "reconsentinel-alpha-$J_STAMP"   "$J_ALPHA_ID"   "J9a" "recon-alpha.txt (must survive)"
+    wait_for_node_present "reconsentinel-charlie-$J_STAMP" "$J_CHARLIE_ID" "J9b" "recon-charlie.txt (must survive)"
+
+    # index-proof on the deleted node: ABSENT, measured rather than inferred from search scoring.
+    verdict=$(index_proof "$J_BRAVO_ID" | jq -r '.verdict // empty')
+    if [ "$verdict" = "ABSENT" ]; then
+      pass "J10: index-proof reports ABSENT for the reconciled-away node"
+    else
+      fail "J10: index-proof verdict for the reconciled-away node is '$verdict' (expected ABSENT)"
+    fi
+  fi
+
+  j_restore_live_ingester
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  SECTION R — AFTS Regression Tests

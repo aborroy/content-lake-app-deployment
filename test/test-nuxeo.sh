@@ -46,6 +46,10 @@ RAG_PRESENCE_TOPK="${RAG_PRESENCE_TOPK:-50}"
 # Deadline (seconds) for polling a just-synced document into searchable state. Configurable so slow
 # inference backends can extend it without editing the suite.
 POLL_DEADLINE_S="${POLL_DEADLINE_S:-180}"
+# Deployment root, so a section that needs to stop a service can reach docker compose. run-tests.sh
+# does not export its own DEPLOY_DIR, and this suite is also run standalone.
+DEPLOY_DIR="${DEPLOY_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+LAST_SYNC_JOB_ID=""
 LOG="test-results-nuxeo-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
@@ -53,6 +57,7 @@ G='\033[0;32m'; R='\033[0;31m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[1m'; N='
 pass()    { printf "${G}[PASS]${N} %s\n" "$*"; PASS=$((PASS+1)); }
 fail()    { printf "${R}[FAIL]${N} %s\n" "$*"; FAIL=$((FAIL+1)); }
 info()    { printf "${C}[INFO]${N} %s\n" "$*"; }
+warn()    { printf "${Y}[WARN]${N} %s\n" "$*"; }
 section() { printf "\n${B}${C}─── %s ───${N}\n" "$*"; }
 cleanup() { rm -rf "$TMPDIR_DATA"; }
 trap cleanup EXIT
@@ -64,6 +69,7 @@ trap cleanup EXIT
 run_nuxeo_sync_wait() {
   local trigger_tid="${1:-D3}" complete_tid="${2:-D4}" label="${3:-Nuxeo sync}"
   local resp job_id status
+  LAST_SYNC_JOB_ID=""
   resp=$(curl -sf -u "$NUXEO_AUTH" -X POST "$SYNC_URL/configured$SYNC_Q" 2>/dev/null || echo '{}')
   job_id=$(echo "$resp" | jq -r '.jobId // empty')
 
@@ -71,6 +77,7 @@ run_nuxeo_sync_wait() {
     fail "$trigger_tid: Sync trigger returned no jobId (response: $resp)"
     return 1
   fi
+  LAST_SYNC_JOB_ID="$job_id"
   pass "$trigger_tid: $label triggered — jobId=$job_id"
 
   local elapsed=0
@@ -1123,6 +1130,98 @@ run_nuxeo_sync_wait "I3" "I4" "Scope exclusion sync"
 # Poll for the in-scope doc to a deadline; the out-of-scope absence check then runs once it appears.
 [ -n "${I_IN_SCOPE_UID:-}" ]  && wait_for_source_present "$NUXEO_AUTH" "$I_IN_SCOPE_QUERY" "$I_IN_SCOPE_UID" "nuxeo" "I5" "In-scope control document remains indexed"
 [ -n "${I_OUT_SCOPE_UID:-}" ] && rag_absent_uid  "$I_OUT_SCOPE_QUERY" "$I_OUT_SCOPE_UID"          "I6" "Out-of-scope control document stays absent from search"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SECTION J - Deletion Reconciliation
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deletion otherwise depends entirely on an audit entry reaching the live ingester. With it stopped, a
+# document removed from Nuxeo outlives its source in the index and search returns it as a phantom
+# result. A batch sync must reconcile the index against what its discovery pass actually saw.
+#
+# The live ingester is stopped for the whole window on purpose: with it running, the audit-driven
+# delete would remove the document and the test would pass without the sweep existing at all.
+section "J - Deletion Reconciliation (live ingester stopped)"
+
+J_ALPHA_QUERY="reconsentinel alpha $TEST_RUN_ALPHA_TAG"
+J_BRAVO_QUERY="reconsentinel bravo $TEST_RUN_ALPHA_TAG"
+J_LIVE_STOPPED=0
+
+# Restore the live ingester however this section exits. run-tests.sh wipes volumes between phases,
+# not within one, so leaving it stopped would silently break every later section in this phase.
+j_restore_live_ingester() {
+  if [ "$J_LIVE_STOPPED" -eq 1 ]; then
+    info "J: restarting nuxeo-live-ingester"
+    (cd "$DEPLOY_DIR" 2>/dev/null && docker compose --profile nuxeo start nuxeo-live-ingester >/dev/null 2>&1) \
+      || warn "J: could not restart nuxeo-live-ingester; later live-ingestion assertions may fail"
+    J_LIVE_STOPPED=0
+    sleep 10
+  fi
+}
+trap 'j_restore_live_ingester; cleanup' EXIT
+
+# Two documents. Bravo is deleted at the source; alpha is the negative control, because without it
+# this section would pass on a sweep that deletes everything.
+J_ALPHA_UID=$(create_demo_file "Nuxeo Reconcile Alpha $TEST_RUN_TAG" \
+  "RECONCILE CONTROL DOCUMENT. Content: $J_ALPHA_QUERY. This document must survive the sweep.")
+J_BRAVO_UID=$(create_demo_file "Nuxeo Reconcile Bravo $TEST_RUN_TAG" \
+  "RECONCILE TARGET DOCUMENT. Content: $J_BRAVO_QUERY. This document is deleted at the source.")
+
+if [ -z "${J_ALPHA_UID:-}" ] || [ -z "${J_BRAVO_UID:-}" ]; then
+  fail "J1: could not create both reconciliation fixtures -- skipping section J"
+else
+  pass "J1: reconciliation fixtures created (alpha=$J_ALPHA_UID, bravo=$J_BRAVO_UID)"
+
+  run_nuxeo_sync_wait "J2a" "J2b" "Reconciliation initial sync"
+
+  wait_for_source_present "$NUXEO_AUTH" "$J_ALPHA_QUERY" "$J_ALPHA_UID" "nuxeo" "J3a" "Reconcile alpha indexed"
+  wait_for_source_present "$NUXEO_AUTH" "$J_BRAVO_QUERY" "$J_BRAVO_UID" "nuxeo" "J3b" "Reconcile bravo indexed"
+
+  info "J: stopping nuxeo-live-ingester so no audit-driven delete can reach hxpr"
+  if (cd "$DEPLOY_DIR" 2>/dev/null && docker compose --profile nuxeo stop nuxeo-live-ingester >/dev/null 2>&1); then
+    J_LIVE_STOPPED=1
+    pass "J4: nuxeo-live-ingester stopped"
+  else
+    warn "J4: could not stop nuxeo-live-ingester; the sweep result below may be attributable to the audit path"
+  fi
+
+  code=$(delete_nuxeo_doc "$J_BRAVO_UID")
+  if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+    pass "J5: reconcile bravo deleted from Nuxeo (HTTP $code)"
+  else
+    fail "J5: deleting reconcile bravo returned HTTP $code (expected 204)"
+  fi
+
+  # Wait until Nuxeo itself stops returning it. Nuxeo trashes before it purges, and a trashed
+  # document leaves the configured lifecycle scope, so discovery stops seeing it either way.
+  elapsed=0
+  while [ $elapsed -lt 60 ]; do
+    code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
+      "$NUXEO_BASE/id/$J_BRAVO_UID" 2>/dev/null || echo 404)
+    [ "$code" = "404" ] && break
+    sleep 5; elapsed=$((elapsed + 5))
+  done
+
+  run_nuxeo_sync_wait "J6a" "J6b" "Reconciling sync"
+
+  # The sweep's own report, read off the job. A bare "the document is gone" assertion would also pass
+  # if something else removed it, so assert the sweep says it did the deleting.
+  recon=$(curl -sf -u "$NUXEO_AUTH" "$SYNC_URL/status/$LAST_SYNC_JOB_ID$SYNC_Q" 2>/dev/null \
+    | jq -c '.reconciliation // {}' 2>/dev/null || echo '{}')
+  recon_status=$(echo "$recon" | jq -r '.status // empty')
+  recon_deleted=$(echo "$recon" | jq -r '.deleted // 0')
+  if [ "$recon_status" = "COMPLETED" ] && [ "${recon_deleted:-0}" -ge 1 ]; then
+    pass "J7: sweep reports status=COMPLETED deleted=$recon_deleted"
+  else
+    fail "J7: sweep reports $recon (expected status=COMPLETED with deleted>=1)"
+  fi
+
+  rag_absent_uid "$J_BRAVO_QUERY" "$J_BRAVO_UID" "J8" "Reconciled-away document is gone from search"
+
+  # The negative control: the sweep must not have taken alpha with it.
+  wait_for_source_present "$NUXEO_AUTH" "$J_ALPHA_QUERY" "$J_ALPHA_UID" "nuxeo" "J9" "Reconcile alpha must survive"
+
+  j_restore_live_ingester
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Summary

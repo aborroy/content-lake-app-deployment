@@ -13,9 +13,16 @@
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)
+#   Trace backend (opt-in): add the 'observability' profile to a base stack, e.g.
+#     MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-lgtm:4318/v1/traces \
+#     RAG_OBSERVABILITY_PAYLOADS_ENABLED=true \
+#       docker compose --profile demo --profile observability up -d
+#     (Grafana on :3001 with anonymous admin; development only. Read docs/deployment-rag.md before
+#      enabling RAG_OBSERVABILITY_CAPTURE_CONTENT: it exports ACL-protected document content)
 #   make down               Stop all services
 #   make logs               Follow logs
 #   make ps                 Show service status
+#   make verify-profiles    Assert every opt-in profile stays opt-in
 #   make config             Dry-run: render resolved compose configuration
 #   make clean              Stop + remove all volumes  [DESTRUCTIVE]
 #
@@ -55,7 +62,7 @@ endif
 
 DC := $(LOAD_ENV) docker compose $(ENV_ARGS)
 
-.PHONY: help up-alfresco up-nuxeo up-full up-demo down logs ps config clean start-ai stop-ai local
+.PHONY: help up-alfresco up-nuxeo up-full up-demo down logs ps config clean start-ai stop-ai local verify-profiles
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
@@ -153,6 +160,30 @@ clean: ## Stop containers and remove ALL volumes [DESTRUCTIVE — wipes all data
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	$(DC) --profile '*' down -v
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml down -v 2>/dev/null || true
+
+verify-profiles: ## Assert every opt-in profile stays opt-in (no service leaks into a base profile)
+	@# An opt-in service that appears in a base profile is a silent dependency: every existing
+	@# deployment would suddenly need it. Compose resolves profiles here, so this catches a missing or
+	@# mistyped `profiles:` key that inspection would not.
+	@fail=0; \
+	for profile in alfresco nuxeo full demo; do \
+	  services=$$($(DC) --profile $$profile config --services 2>/dev/null | sort | tr '\n' ' '); \
+	  for optin in otel-lgtm filesystem-batch-ingester opensearch-dashboards; do \
+	    case " $$services " in \
+	      *" $$optin "*) echo "FAIL: $$optin is in the '$$profile' profile but should be opt-in only"; fail=1 ;; \
+	    esac; \
+	  done; \
+	  echo "ok: profile '$$profile' has no opt-in service"; \
+	done; \
+	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "debug:opensearch-dashboards"; do \
+	  profile=$${pair%%:*}; service=$${pair##*:}; \
+	  services=$$($(DC) --profile demo --profile $$profile config --services 2>/dev/null | tr '\n' ' '); \
+	  case " $$services " in \
+	    *" $$service "*) echo "ok: --profile $$profile adds $$service" ;; \
+	    *) echo "FAIL: --profile $$profile does not add $$service"; fail=1 ;; \
+	  esac; \
+	done; \
+	exit $$fail
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 

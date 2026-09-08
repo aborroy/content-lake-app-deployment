@@ -86,6 +86,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, opensearch-dashboards (`debug` profile) |
 | [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
+| [`compose.observability.yaml`](compose.observability.yaml) | Trace backend for the RAG spans: otel-lgtm (`observability` profile) |
 
 Always run from the project root using `make` or `docker compose` -- the included files are not
 designed to be run in isolation.
@@ -204,6 +205,12 @@ Notes:
 - `opensearch-dashboards` is opt-in (`debug` profile) and published on port `5601`, not through
   `proxy`. It is unauthenticated, so keep it off unless you are debugging locally:
   `docker compose --profile demo --profile debug up -d opensearch-dashboards`.
+- `otel-lgtm` is opt-in (`observability` profile) and published on port `3001`, not through `proxy`. It
+  bundles an OTLP collector, Prometheus, Tempo and a Grafana with anonymous admin access, so it is for
+  local development only. Point `MANAGEMENT_OTLP_TRACING_ENDPOINT` at it and set
+  `RAG_OBSERVABILITY_PAYLOADS_ENABLED=true` to see what a RAG request retrieved and what it spent;
+  `RAG_OBSERVABILITY_CAPTURE_CONTENT` additionally exports document content and is off by default.
+  `make verify-profiles` asserts this and the other opt-in profiles never leak into a base profile.
 - hxpr needs only `mongodb` and `opensearch`, matching the reference stack in
   `Hyland/ai-ready-index` (`server/hxpr-community-internal-app/docker-compose.yml`). The community
   app runs async tasks in memory and stores blobs locally, so there is no LocalStack (S3/SNS/SQS)

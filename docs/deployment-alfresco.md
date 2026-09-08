@@ -143,6 +143,43 @@ curl -u Administrator:Administrator -X POST 'http://localhost/api/sync/configure
 
 ---
 
+## Reconciling Deletions
+
+A delete only reaches the index if a delete event reaches the live ingester. With the live ingester down,
+a dropped broker message, or a node removed while only the batch ingester runs, the document outlives its
+source and search returns it as a phantom result. Nothing sweeps for that on its own.
+
+Each batch ingester can compare the index against what its discovery pass saw and delete the difference,
+after a sync that completed cleanly. It is off by default in the application, because it deletes
+documents. This stack turns it on with a raised ratio, since the demo corpus is small enough that the
+default 0.10 trips on a single legitimate deletion:
+
+| Variable | Default here | What it does |
+|---|---|---|
+| `INGESTION_RECONCILE_ENABLED` | `true` | Whether the sweep runs at all. The application default is `false` |
+| `INGESTION_RECONCILE_MAX_DELETE_RATIO` | `0.5` | Largest fraction of in-scope documents one sweep may delete before aborting. The application default is `0.10` |
+| `INGESTION_RECONCILE_MAX_DELETES` | `1000` | Absolute ceiling per sweep |
+| `INGESTION_RECONCILE_MAX_SEEN_IDS` | `200000` | Bound on the node ids retained from discovery. Above it the sweep deletes nothing |
+| `INGESTION_RECONCILE_PAGE_SIZE` | `200` | Documents per page when scanning the index |
+
+The Nuxeo and filesystem ingesters take the same five under `NUXEO_BATCH_RECONCILE_*` and
+`FILESYSTEM_BATCH_RECONCILE_*`.
+
+Read the result off the job rather than inferring it from the index:
+
+```bash
+curl -u admin:admin "http://localhost/api/sync/status/<jobId>" | jq '.reconciliation'
+```
+
+Any `status` other than `COMPLETED` means nothing was deleted and names the reason. **The first sweep on
+a corpus that has accumulated drift will abort on the ratio guard**, because a corpus with many genuinely
+stale documents is indistinguishable from a broken discovery pass. That is the guard working: read the
+logged figures, confirm the deletions are genuine, raise the ratio for one run, then lower it again.
+
+The filesystem source has no live ingester, so there this sweep is the only path that ever deletes.
+
+---
+
 ## Deploying to AWS EC2
 
 See [DEPLOY_EC2.md](DEPLOY_EC2.md) for a step-by-step guide to running the full stack on a

@@ -112,7 +112,7 @@ either failure is a caller seeing fewer documents than they should, together wit
 rag-service log.
 
 Only three paths are public: `/api/rag/health`, `/actuator/health` and `/actuator/info`. Every other
-path, including `/actuator/metrics` and `/actuator/prometheus`, requires credentials. Adding a route
+path, `/actuator/metrics` included, requires credentials. Adding a route
 takes no security configuration to protect it; the chain denies by default, so a new endpoint is
 authenticated unless it is deliberately exempted.
 
@@ -406,36 +406,88 @@ implementation if multiple rag-service instances or pod restarts are expected.
 
 ## Observability
 
-Metrics are exposed via Micrometer at `/actuator/prometheus`. Key metrics:
-
-- `rag_requests_total` -- total RAG requests
-- `rag_latency_seconds` -- end-to-end latency
-- `search_results_count` -- results returned per query
-- `embedding_requests_total` -- embedding API calls
-
 Health: `/actuator/health` (public, no auth required, so the container orchestrator can probe it).
 Info: `/actuator/info` (public).
 
-`/actuator/metrics` and `/actuator/prometheus` require credentials: they enumerate the service's
-endpoints and reveal request volumes and timings. A scraper needs an account valid in one of the
-configured content sources, the same as any other caller:
+Metrics come from Micrometer at `/actuator/metrics`, which requires credentials: it enumerates the
+service's endpoints and reveals request volumes and timings. A scraper needs an account valid in one of
+the configured content sources, the same as any other caller:
 
 ```bash
-curl -u admin:admin http://localhost/actuator/prometheus
+curl -u admin:admin http://localhost/actuator/metrics
 ```
+
+There is no `/actuator/prometheus`. No Prometheus registry is on the classpath and `prometheus` is not
+in `management.endpoints.web.exposure.include`, so exporting metrics in that format means adding
+`micrometer-registry-prometheus` and publishing one more authenticated endpoint. Traces, described
+below, carry the RAG payloads; metrics export is a separate decision.
 
 ### Distributed tracing
 
-The pipeline is instrumented with Micrometer Tracing (OpenTelemetry bridge). Named spans cover the
-key steps -- `rag.embed.query`, `rag.search.vector`, `rag.search.keyword`, and `rag.generate` -- so a
-single request shows which embedding, hxpr query, or LLM call inside a phase was the bottleneck,
-beyond the coarse `searchTimeMs`/`generationTimeMs`/`totalTimeMs` fields on the prompt response.
-Trace and span ids are added to every log line via the MDC (`[rag-service,<traceId>,<spanId>]`).
+The pipeline is instrumented with Micrometer Tracing (OpenTelemetry bridge). One request produces one
+trace:
 
-- `MANAGEMENT_TRACING_SAMPLING_PROBABILITY` -- sampling rate (default `0.1`; set `1.0` in dev).
-- `MANAGEMENT_OTLP_TRACING_ENDPOINT` -- OTLP `/v1/traces` collector URL. **Blank by default**, so
-  spans are created and logged but nothing is exported and no collector is required. Point it at a
-  collector (e.g. `http://otel-collector:4318/v1/traces`) to ship traces.
+```
+rag.request                     the whole RAG request
+  rag.retrieve                  retrieve, diversify, rerank, grade
+    rag.embed.query             the query embedding call
+    rag.search.vector           the hxpr vector query
+    rag.search.keyword          the hxpr keyword query (hybrid only)
+  rag.augment                   section expansion and context assembly
+  rag.generate                  the LLM call
+```
+
+Spring AI contributes its own advisor and model spans in between, so `rag.retrieve` and the rest are
+descendants of `rag.request` rather than its direct children. On the streaming path the HTTP server
+span closes when the `SseEmitter` is returned, before generation finishes, so `rag.request` outlives it
+-- legal in OpenTelemetry, and it looks like a detached root in some trace UIs.
+
+Trace and span ids reach every log line via the MDC (`[rag-service,<traceId>,<spanId>]`).
+
+- `MANAGEMENT_TRACING_SAMPLING_PROBABILITY` -- sampling rate (default `0.1`; set `1.0` in dev). This is
+  the only sampling knob; `RAG_OBSERVABILITY_*` deliberately does not add a second one.
+- `MANAGEMENT_OTLP_TRACING_ENDPOINT` -- OTLP `/v1/traces` collector URL. **Blank by default**, so spans
+  are created and logged but nothing is exported and no collector is required.
+
+### Span payloads
+
+Spans carry no payload unless asked. `RAG_OBSERVABILITY_PAYLOADS_ENABLED=true` attaches, per request:
+the retrieved chunk ids, their document ids, scores and ranks; hit, candidate and pass counts; the
+grading verdict; context and prompt sizes; token usage with its provenance
+(`rag.tokens.total.source` is `usage`, `estimated` or `unavailable`, because a local backend often
+reports none); the model; and which retrieval features configuration has enabled, as one
+`rag.features` tag.
+
+Note what "off by default" means here. With actuator on the classpath the `ObservationRegistry` is
+never a no-op, so the spans exist on every request whatever this flag says. What the flag governs is
+whether each one pays an O(hits) payload build, which is wasted work when nothing is exported. Turn it
+on together with `MANAGEMENT_OTLP_TRACING_ENDPOINT`.
+
+`RAG_OBSERVABILITY_CAPTURE_CONTENT=true` additionally attaches the question, its reformulated variant,
+the retrieved chunk text, those documents' names and paths, and the answer. **That is ACL-protected
+content leaving the service**, and a trace backend applies its own access model rather than the
+documents' ACLs. Read the "Trace payloads are not ACL-filtered" section of the app repository's
+`docs/security-model.md` before enabling it. `RAG_OBSERVABILITY_MAX_CONTENT_CHARS` (default 2000)
+truncates each captured value and `RAG_OBSERVABILITY_MAX_CHUNKS_RECORDED` (default 20) bounds the
+per-hit lists, so an enabled deployment cannot ship a whole context block per span.
+
+### A local trace backend
+
+The `observability` profile adds a single container bundling an OTLP collector, Prometheus, Tempo and a
+pre-provisioned Grafana:
+
+```bash
+MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-lgtm:4318/v1/traces \
+MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0 \
+RAG_OBSERVABILITY_PAYLOADS_ENABLED=true \
+  docker compose --profile demo --profile observability up -d
+# Grafana on http://localhost:3001, Explore -> Tempo
+```
+
+It is a development and eval backend: Grafana runs with anonymous admin access. A real deployment
+points the endpoint at its own collector and does not use this profile. `make down` and `make clean`
+tear it down with everything else, and `make verify-profiles` asserts it never leaks into a base
+profile.
 
 ### Cache metrics
 

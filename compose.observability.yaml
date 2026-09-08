@@ -1,0 +1,62 @@
+# compose.observability.yaml — optional trace and metrics backend (profile: observability)
+# Part of the content-lake-app stack; loaded via include: in compose.yaml.
+#
+# Development and eval only. One container bundling an OpenTelemetry collector, Prometheus, Tempo and a
+# pre-provisioned anonymous-admin Grafana, chosen over a separate collector + Jaeger + Prometheus +
+# Grafana set because that would be four services and three config files in a stack that already runs
+# twenty. A production deployment points MANAGEMENT_OTLP_TRACING_ENDPOINT at its own collector instead
+# and does not use this file at all.
+#
+# Usage:
+#   docker compose --profile full --profile observability up -d
+#   MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-lgtm:4318/v1/traces
+#   RAG_OBSERVABILITY_PAYLOADS_ENABLED=true
+#   # ACL-protected content; read docs/security-model.md before enabling:
+#   RAG_OBSERVABILITY_CAPTURE_CONTENT=true
+#
+# Two things this deliberately does NOT do:
+#
+#   - rag-service gains no depends_on here. A dependency on a profile-gated service would make every
+#     existing profile depend on this one, which is exactly what "every existing profile behaves
+#     identically without it" rules out. With no dependency, an unreachable endpoint simply fails the
+#     export, which is the degradation we want.
+#
+#   - Metrics export is not wired. That would mean micrometer-registry-prometheus on the rag-service
+#     classpath plus prometheus in management.endpoints.web.exposure.include, which contradicts the
+#     hardening checklist item in docs/security-model.md about not exposing /actuator/prometheus.
+#     Traces carry the payloads #116 is about; metrics export is a separate decision.
+
+services:
+
+  otel-lgtm:
+    profiles: [observability]
+    # Pinned: :latest silently changes the bundled Grafana, Tempo and collector versions together.
+    image: grafana/otel-lgtm:0.11.6
+    restart: unless-stopped
+    ports:
+      # Grafana UI. Not 3000: that port is commonly taken on a developer machine.
+      - "${OTEL_GRAFANA_PORT:-3001}:3000"
+      # OTLP/HTTP — what management.otlp.tracing.endpoint posts to.
+      - "${OTEL_OTLP_HTTP_PORT:-4318}:4318"
+      # OTLP/gRPC — for any other producer that prefers it.
+      - "${OTEL_OTLP_GRPC_PORT:-4317}:4317"
+    environment:
+      # Anonymous admin: this is a local development backend reached over the stack network, and a
+      # login prompt on a throwaway container is friction without a security benefit. It is also the
+      # reason this file must never be used in a deployment reachable from outside.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      # Log ingestion is off: the RAG service exports traces, not logs, and the log pipeline would
+      # otherwise idle.
+      ENABLE_LOGS_ALL: "false"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # Grafana, Tempo and Prometheus all start in one container; the first boot is slow.
+      start_period: 60s
+    networks:
+      # Must share the stack network so rag-service resolves otel-lgtm by name. This is why the file is
+      # in compose.yaml's include list rather than a sibling stack like compose.ai.yaml.
+      - stack

@@ -16,10 +16,19 @@ export ALF_AUTH="${ALF_AUTH:-admin:admin}"
 if [ "$USE_HTTPS" = "true" ]; then SCHEME="https"; CURL_TLS="-k"; else SCHEME="http"; CURL_TLS=""; fi
 BASE="${SCHEME}://${HOST}"
 
-export CONTENT_LAKE_GIT_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-../content-lake-app}"
-export CONTENT_LAKE_ACS_GIT_CONTEXT="${CONTENT_LAKE_ACS_GIT_CONTEXT:-../content-lake-app}"
-export CONTENT_LAKE_UI_GIT_CONTEXT="${CONTENT_LAKE_UI_GIT_CONTEXT:-../alfresco-content-lake-ui}"
-export CONTENT_LAKE_APP_UI_CONTEXT="${CONTENT_LAKE_APP_UI_CONTEXT:-../content-lake-app-ui}"
+# Held in separate variables because `set -a; . ./.env` inside dc() assigns unconditionally and .env
+# pins CONTENT_LAKE_GIT_CONTEXT to the GitHub URL: exporting these alone is not enough, dc() has to
+# re-apply them after sourcing. Without that this script builds and tests origin/main while looking
+# like it tested the sibling checkout -- the build succeeds and the suite runs, it just measures the
+# wrong code.
+LOCAL_CL_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-../content-lake-app}"
+LOCAL_CL_ACS_CONTEXT="${CONTENT_LAKE_ACS_GIT_CONTEXT:-../content-lake-app}"
+LOCAL_CL_UI_CONTEXT="${CONTENT_LAKE_UI_GIT_CONTEXT:-../alfresco-content-lake-ui}"
+LOCAL_CL_APP_UI_CONTEXT="${CONTENT_LAKE_APP_UI_CONTEXT:-../content-lake-app-ui}"
+export CONTENT_LAKE_GIT_CONTEXT="$LOCAL_CL_CONTEXT"
+export CONTENT_LAKE_ACS_GIT_CONTEXT="$LOCAL_CL_ACS_CONTEXT"
+export CONTENT_LAKE_UI_GIT_CONTEXT="$LOCAL_CL_UI_CONTEXT"
+export CONTENT_LAKE_APP_UI_CONTEXT="$LOCAL_CL_APP_UI_CONTEXT"
 
 CL_APP_SERVICES_ALFRESCO="rag-service batch-ingester live-ingester"
 
@@ -33,6 +42,14 @@ ok(){ printf "${G}[OK]${N}   %s\n" "$*"; }
 dc(){
   ( cd "$DEPLOY_DIR" \
     && set -a && . ./.env && [ -f ./.env.local ] && . ./.env.local; set +a \
+    && if [ "$USE_LOCAL" = "1" ]; then
+         CONTENT_LAKE_GIT_CONTEXT="$LOCAL_CL_CONTEXT"
+         CONTENT_LAKE_ACS_GIT_CONTEXT="$LOCAL_CL_ACS_CONTEXT"
+         CONTENT_LAKE_UI_GIT_CONTEXT="$LOCAL_CL_UI_CONTEXT"
+         CONTENT_LAKE_APP_UI_CONTEXT="$LOCAL_CL_APP_UI_CONTEXT"
+         export CONTENT_LAKE_GIT_CONTEXT CONTENT_LAKE_ACS_GIT_CONTEXT \
+                CONTENT_LAKE_UI_GIT_CONTEXT CONTENT_LAKE_APP_UI_CONTEXT
+       fi \
     && NGINX_SYNC_DEFAULT_BACKEND="${NGINX_SYNC_DEFAULT_BACKEND:-batch-ingester:9090}" \
        NGINX_ROOT_DIRECTIVE="${NGINX_ROOT_DIRECTIVE:-return 302 /aca/;}" \
        docker compose --env-file .env.local "$@" )

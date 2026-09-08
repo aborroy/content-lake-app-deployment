@@ -42,6 +42,15 @@ services:
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
       INGESTION_FOLDER_1: ${INGESTION_FOLDER_1:--root-}
+      # Post-discovery reconciliation sweep. The application default is false; this stack opts in
+      # because the end-to-end suite asserts the delete-while-live-ingester-down case. The ratio is
+      # raised from 0.10 because the test corpus is a handful of documents, where 0.10 rounds to a
+      # guard that trips on a single legitimate deletion.
+      INGESTION_RECONCILE_ENABLED: ${INGESTION_RECONCILE_ENABLED:-true}
+      INGESTION_RECONCILE_MAX_DELETE_RATIO: ${INGESTION_RECONCILE_MAX_DELETE_RATIO:-0.5}
+      INGESTION_RECONCILE_MAX_DELETES: ${INGESTION_RECONCILE_MAX_DELETES:-1000}
+      INGESTION_RECONCILE_MAX_SEEN_IDS: ${INGESTION_RECONCILE_MAX_SEEN_IDS:-200000}
+      INGESTION_RECONCILE_PAGE_SIZE: ${INGESTION_RECONCILE_PAGE_SIZE:-200}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -232,6 +241,23 @@ services:
       RAG_RERANKER_TOP_N: ${RAG_RERANKER_TOP_N:-8}
       RAG_SOURCE_LINKS_ALFRESCO_TEMPLATE: "/aca/#/search/(viewer:view/{nodeId})?location=%2Frag"
       RAG_SOURCE_LINKS_NUXEO_TEMPLATE: "/nuxeo/ui/#!/browse{nuxeoPath}"
+      # Tracing (#73) and span payloads (#116). A blank endpoint means "create spans, export nothing",
+      # which is the application default; with --profile observability, point it at the bundled
+      # collector: http://otel-lgtm:4318/v1/traces
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: ${MANAGEMENT_OTLP_TRACING_ENDPOINT:-}
+      # The only sampling knob. Listed here because environment is an explicit mapping: without this
+      # line the variable never reaches the container, so the knob is configurable in the application
+      # and not on the stack.
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-0.1}
+      # Attaches chunk ids, scores, counts and token usage to the RAG spans. Off by default.
+      RAG_OBSERVABILITY_PAYLOADS_ENABLED: ${RAG_OBSERVABILITY_PAYLOADS_ENABLED:-false}
+      # ALSO copies the question, the retrieved chunk text, source names and paths, and the answer into
+      # the trace backend. That is ACL-protected content leaving the service, and the backend's readers
+      # are whoever can reach it rather than the ACL that governed the retrieval. Off by default; read
+      # docs/security-model.md before turning it on.
+      RAG_OBSERVABILITY_CAPTURE_CONTENT: ${RAG_OBSERVABILITY_CAPTURE_CONTENT:-false}
+      RAG_OBSERVABILITY_MAX_CHUNKS_RECORDED: ${RAG_OBSERVABILITY_MAX_CHUNKS_RECORDED:-20}
+      RAG_OBSERVABILITY_MAX_CONTENT_CHARS: ${RAG_OBSERVABILITY_MAX_CONTENT_CHARS:-2000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -269,6 +295,13 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+      # Post-discovery reconciliation sweep. Application default is false; this stack opts in for the
+      # end-to-end delete-while-live-ingester-down case, with the ratio raised for a small corpus.
+      NUXEO_BATCH_RECONCILE_ENABLED: ${NUXEO_BATCH_RECONCILE_ENABLED:-true}
+      NUXEO_BATCH_RECONCILE_MAX_DELETE_RATIO: ${NUXEO_BATCH_RECONCILE_MAX_DELETE_RATIO:-0.5}
+      NUXEO_BATCH_RECONCILE_MAX_DELETES: ${NUXEO_BATCH_RECONCILE_MAX_DELETES:-1000}
+      NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS: ${NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
+      NUXEO_BATCH_RECONCILE_PAGE_SIZE: ${NUXEO_BATCH_RECONCILE_PAGE_SIZE:-200}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -308,6 +341,14 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+      # Post-discovery reconciliation sweep. This source has no live ingester, so a batch sync is the
+      # only path that writes and this sweep is the only path that ever deletes: without it, a file
+      # removed from the mounted directory stays searchable forever.
+      FILESYSTEM_BATCH_RECONCILE_ENABLED: ${FILESYSTEM_BATCH_RECONCILE_ENABLED:-true}
+      FILESYSTEM_BATCH_RECONCILE_MAX_DELETE_RATIO: ${FILESYSTEM_BATCH_RECONCILE_MAX_DELETE_RATIO:-0.5}
+      FILESYSTEM_BATCH_RECONCILE_MAX_DELETES: ${FILESYSTEM_BATCH_RECONCILE_MAX_DELETES:-1000}
+      FILESYSTEM_BATCH_RECONCILE_MAX_SEEN_IDS: ${FILESYSTEM_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
+      FILESYSTEM_BATCH_RECONCILE_PAGE_SIZE: ${FILESYSTEM_BATCH_RECONCILE_PAGE_SIZE:-200}
     volumes:
       # Mount the host directory to ingest (read-only). Override with FILESYSTEM_HOST_PATH.
       - "${FILESYSTEM_HOST_PATH:-./filesystem-data}:/data/filesystem:ro"
