@@ -98,6 +98,7 @@ designed to be run in isolation.
 | [docs/deployment-alfresco.md](docs/deployment-alfresco.md) | Full stack prerequisites, credentials, first run, Alfresco requirements, configuration reference |
 | [docs/deployment-nuxeo.md](docs/deployment-nuxeo.md) | Nuxeo stack setup, REST API reference, scope/auth config, audit live sync |
 | [docs/deployment-rag.md](docs/deployment-rag.md) | RAG service configuration, REST API, security, conversation memory, observability |
+| [docs/extraction.md](docs/extraction.md) | Text extraction paths, markdown vs plaintext, the `transform-extras` profile |
 | [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md) | Step-by-step guide to running the full stack on AWS EC2 |
 
 ## Service Topology
@@ -423,6 +424,12 @@ Key overrides:
 | `MODEL_RUNNER_URL` | `http://model-runner.docker.internal` | LLM/embedding inference backend |
 | `EMBEDDING_MODEL` | `ai/mxbai-embed-large` | Embedding model |
 | `LLM_MODEL` | `ai/qwen2.5` | Chat/RAG model |
+| `EXTRACTION_FORMAT` | `plaintext` | `plaintext`, `auto` or `markdown`. Whether extraction asks a transform engine for markdown, so headings and tables survive chunking. See [docs/extraction.md](docs/extraction.md) |
+| `TRANSFORM_URL` | `http://transform-core-aio:8090` | Transform engine for the Alfresco ingesters. Point at `http://transform-liteparse:8090` or `http://transform-convert2md:8090` with the `transform-extras` profile |
+| `EXTRACTION_ENGINE_URL` | *(empty)* | Transform engine for the Nuxeo and filesystem ingesters, which have none by default. Empty leaves them on in-process Tika |
+| `EXTRACTION_ENGINE_TIMEOUT_MS` | `300000` | Read timeout for the above. Do not lower it: `convert2md` needs tens of seconds per PDF |
+| `TRANSFORM_EXTRAS_TAG` | `1.1.0` | `transform-liteparse` image tag. 1.1.0 or newer is required for spreadsheet tables |
+| `TRANSFORM_CONVERT2MD_TAG` | `1.1.0` | `transform-convert2md` image tag |
 
 On Linux, override `MODEL_RUNNER_URL=http://host.docker.internal:12434` in `.env.local`.
 

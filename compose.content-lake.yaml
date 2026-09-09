@@ -33,7 +33,17 @@ services:
       HXPR_USERNAME: ${HXPR_USERNAME}
       HXPR_PASSWORD: ${HXPR_PASSWORD}
       CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME: ${CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME:-contentlake.acl.changed}
-      TRANSFORM_URL: http://transform-core-aio:8090
+      # Overridable so the ingester can be pointed at a markdown-capable engine (see the
+      # transform-extras profile below) instead of the official plaintext-only AIO.
+      TRANSFORM_URL: ${TRANSFORM_URL:-http://transform-core-aio:8090}
+      TRANSFORM_TIMEOUT_MS: ${TRANSFORM_TIMEOUT_MS:-300000}
+      # plaintext (default) keeps today's behaviour exactly. auto/markdown ask the engine for
+      # text/markdown where it advertises it, so tables survive chunking as ChunkType.TABLE.
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
+      # Extra extraction services tried before transform-core-aio, most structural first. Comma
+      # separated; an entry may carry a backend-kind prefix (transform:, and others as they are added).
+      # Empty means only the transform service above is used.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
@@ -83,7 +93,17 @@ services:
       HXPR_TARGET_PATH: ${HXPR_TARGET_PATH}
       HXPR_USERNAME: ${HXPR_USERNAME}
       HXPR_PASSWORD: ${HXPR_PASSWORD}
-      TRANSFORM_URL: http://transform-core-aio:8090
+      # Overridable so the ingester can be pointed at a markdown-capable engine (see the
+      # transform-extras profile below) instead of the official plaintext-only AIO.
+      TRANSFORM_URL: ${TRANSFORM_URL:-http://transform-core-aio:8090}
+      TRANSFORM_TIMEOUT_MS: ${TRANSFORM_TIMEOUT_MS:-300000}
+      # plaintext (default) keeps today's behaviour exactly. auto/markdown ask the engine for
+      # text/markdown where it advertises it, so tables survive chunking as ChunkType.TABLE.
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
+      # Extra extraction services tried before transform-core-aio, most structural first. Comma
+      # separated; an entry may carry a backend-kind prefix (transform:, and others as they are added).
+      # Empty means only the transform service above is used.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
@@ -285,6 +305,14 @@ services:
       NUXEO_SOURCE_ID: ${NUXEO_SOURCE_ID:-local}
       NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces}
       NUXEO_DISCOVERY_MODE: ${NUXEO_DISCOVERY_MODE:-CHILDREN}
+      # No repository transform service backs this source, so extraction is in-process Tika
+      # unless an engine is configured. Empty = unchanged behaviour. Point it at the
+      # transform-extras profile for markdown extraction, e.g.
+      #   transform:http://transform-convert2md:8090,transform:http://transform-liteparse:8090
+      # which gives PDF tables from convert2md and spreadsheet tables from liteparse.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
+      EXTRACTION_ENGINE_TIMEOUT_MS: ${EXTRACTION_ENGINE_TIMEOUT_MS:-300000}
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
       HXPR_TARGET_PATH: ${HXPR_NUXEO_TARGET_PATH:-/nuxeo-sync}
@@ -327,6 +355,14 @@ services:
       FILESYSTEM_SOURCE_ID: ${FILESYSTEM_SOURCE_ID:-filesystem}
       # Empty = ingest all files; set e.g. "pdf,docx,txt,md,html" to restrict.
       FILESYSTEM_INCLUDE_EXTENSIONS: ${FILESYSTEM_INCLUDE_EXTENSIONS:-}
+      # No repository transform service backs this source, so extraction is in-process Tika
+      # unless an engine is configured. Empty = unchanged behaviour. Point it at the
+      # transform-extras profile for markdown extraction, e.g.
+      #   transform:http://transform-convert2md:8090,transform:http://transform-liteparse:8090
+      # which gives PDF tables from convert2md and spreadsheet tables from liteparse.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
+      EXTRACTION_ENGINE_TIMEOUT_MS: ${EXTRACTION_ENGINE_TIMEOUT_MS:-300000}
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
       HXPR_TARGET_PATH: ${HXPR_FILESYSTEM_TARGET_PATH:-/filesystem-sync}
@@ -376,6 +412,14 @@ services:
       NUXEO_LIVE_AUDIT_ENABLED: ${NUXEO_LIVE_AUDIT_ENABLED:-true}
       NUXEO_LIVE_AUDIT_CURSOR_FILE: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:-/data/audit-cursor.json}
       NUXEO_INCLUDED_ROOT_1: ${NUXEO_INCLUDED_ROOT_1:-/default-domain/workspaces}
+      # No repository transform service backs this source, so extraction is in-process Tika
+      # unless an engine is configured. Empty = unchanged behaviour. Point it at the
+      # transform-extras profile for markdown extraction, e.g.
+      #   transform:http://transform-convert2md:8090,transform:http://transform-liteparse:8090
+      # which gives PDF tables from convert2md and spreadsheet tables from liteparse.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
+      EXTRACTION_ENGINE_TIMEOUT_MS: ${EXTRACTION_ENGINE_TIMEOUT_MS:-300000}
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
       HXPR_URL: http://hxpr-app:8080
       HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
       HXPR_TARGET_PATH: ${HXPR_NUXEO_TARGET_PATH:-/nuxeo-sync}
@@ -393,5 +437,88 @@ services:
     depends_on:
       hxpr-app:
         condition: service_healthy
+    networks:
+      - stack
+
+  # ── Transform engines (opt-in) ──────────────────────────────────────────────
+  #
+  # Structure-aware text extraction. The official transform-core-aio produces text/plain only, so a
+  # table arrives as an undelimited run of text and is chunked as prose; liteparse produces
+  # text/markdown for PDF and Office formats, which keeps headings and table rows intact so chunking
+  # can segment on them and mark a table chunk as such.
+  #
+  # Strictly opt-in, on its own profile, and asserted so by `make verify-profiles`: every base profile
+  # behaves identically without it. Turn it on with, for example:
+  #
+  #   EXTRACTION_FORMAT=auto docker compose --profile alfresco --profile transform-extras up -d
+  #
+  # Content Lake talks the alfresco-transform-core /transform protocol to it directly rather than
+  # through a repository, so the same engine serves the Alfresco, Nuxeo and filesystem connectors.
+  # For Alfresco set TRANSFORM_URL; for Nuxeo and filesystem set EXTRACTION_ENGINE_URL. Either way
+  # EXTRACTION_FORMAT must be auto or markdown, or the engine is still asked for text/plain.
+  transform-liteparse:
+    profiles: [transform-extras]
+    # Pinned rather than :latest so a run is reproducible. liteparse is ~370 MB and needs about 1 GB
+    # of heap for the LibreOffice conversions behind the Office formats; it needs no GPU, so it does
+    # not interact with the AI inference stack on port 12434.
+    #
+    # 1.1.0 or newer is required for spreadsheets: earlier images reached a sheet through a page
+    # render and silently dropped any column past the page width, and produced no markdown tables.
+    image: angelborroy/alf-tengine-liteparse:${TRANSFORM_EXTRAS_TAG:-1.1.0}
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: >-
+        -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
+        -Dlogging.level.org.alfresco.transform=ERROR
+      # Deliberately absent: TEST_ENDPOINT_ENABLED. The browser form at / (which POSTs to /test) is
+      # disabled by default in alfresco-transform-core 5.4.1 and must stay disabled outside local
+      # development, because it accepts and transforms arbitrary uploads with no authentication.
+    # No `ports:` mapping. The engine is reachable only inside the stack network, matching
+    # transform-core-aio, which also publishes nothing. Never expose 8090 to the host.
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/actuator/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      # Generous start_period: the first call after a container start pays one-off initialisation, and
+      # a cold start read as a hang leads to the engine being blamed for a timeout it did not cause.
+      retries: 10
+      start_period: 60s
+    networks:
+      - stack
+
+  # Docling-based PDF to Markdown. Unlike liteparse this recovers real markdown tables, which is what
+  # ChunkType.TABLE detection needs; measured on a 2-page fixture, its markdown separator-row count
+  # matched the source table count exactly, with every column and value preserved.
+  #
+  # The cost is latency, and it is large: ~20.5s per 2-page PDF warm, against ~0.3-0.65s for liteparse,
+  # roughly 65x. Memory is not the differentiator (~310 MB in use, less than liteparse). So this is the
+  # engine to point at a table-heavy corpus where the ingest time is acceptable, not a general default.
+  #
+  # PDF only -- it advertises no DOCX, XLSX or PPTX transform. Route Office formats to liteparse.
+  #
+  #   EXTRACTION_FORMAT=auto TRANSFORM_URL=http://transform-convert2md:8090 \
+  #     docker compose --profile alfresco --profile transform-extras up -d
+  transform-convert2md:
+    profiles: [transform-extras]
+    # A real released tag exists for this engine, so there is no reason to track :latest.
+    image: angelborroy/alf-tengine-convert2md:${TRANSFORM_CONVERT2MD_TAG:-1.1.0}
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: >-
+        -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
+        -Dlogging.level.org.alfresco.transform=ERROR
+      # TEST_ENDPOINT_ENABLED deliberately absent, as for liteparse.
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/actuator/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      # Docling loads a layout model, so first readiness is slow. Give it room: a cold start read as a
+      # hang gets the engine blamed for a timeout it did not cause.
+      retries: 20
+      start_period: 120s
     networks:
       - stack
