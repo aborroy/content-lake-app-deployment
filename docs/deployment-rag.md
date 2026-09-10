@@ -74,6 +74,15 @@ rag:
     max-iterations: 2      # additional retrieval rounds allowed per request
   mcp:
     enabled: true          # expose the MCP server (behind the same auth chain)
+  embedding:               # querying a corpus that holds more than one embedding type
+    additional-models: []  # models besides the configured one whose vectors are still present
+    type-discovery:
+      enabled: true        # read the types present from the index rather than assuming
+      ttl-seconds: 300
+    backfill:              # re-embed the corpus into the configured type
+      enabled: false
+      docs-per-minute: 60
+      operator-users: []   # accounts allowed to start, pause and resume it
 ```
 
 The prompt-injection, rate-limit, and agentic-tools features default to **off** so the retrieval and
@@ -313,6 +322,65 @@ information disclosure. Custom `hxpr` and `modelRunner` health contributors also
 The batch ingesters (`alfresco-batch-ingester`, `nuxeo-batch-ingester`, `filesystem-batch-ingester`)
 each expose their own `GET /api/status` with the last run's timestamp and discovered / indexed /
 failed counts; the detailed per-job view remains at `GET /api/sync/status`.
+
+### Embedding backfill (opt-in, operator only, reachable only inside the stack network)
+
+Present only when `RAG_EMBEDDING_BACKFILL_ENABLED=true`.
+
+```http
+POST /api/admin/embedding-backfill/start?docsPerMinute=60
+POST /api/admin/embedding-backfill/pause
+POST /api/admin/embedding-backfill/resume
+GET  /api/admin/embedding-backfill/status
+```
+
+**These paths are not published by the proxy.** `nginx.conf.template` routes `/api/rag`, `/api/sync`,
+`/api/content-lake`, `/api/status`, `/mcp` and `/admin`, and there is no `/api/admin`, so a request to
+`https://<host>/api/admin/embedding-backfill/status` falls through to the UI and returns a redirect
+rather than reaching `rag-service`. That is deliberate: a backfill is run by whoever operates the
+deployment, who already has container access, and publishing an admin path would widen what is reachable
+from outside the cluster for every deployment that turns the feature on. `rag-service` publishes no host
+port either, so drive the endpoints from inside the `stack` network:
+
+```bash
+docker run --rm --network content-lake-app_stack curlimages/curl:latest \
+  -s -u admin:<password> -X POST \
+  "http://rag-service:9091/api/admin/embedding-backfill/start?docsPerMinute=60"
+```
+
+Re-embeds every indexed document into the currently configured embedding type, leaving other types in
+place so they keep answering queries until the run finishes. The three state-changing calls require an
+account named in `RAG_EMBEDDING_BACKFILL_OPERATOR_USERS`; anyone else gets 403, because the job writes
+to the whole corpus and spends the embedding throughput the ingesters need. `status` is readable by any
+authenticated caller and reports the target type plus counts of documents scanned, backfilled, skipped
+(already carrying the target type, or holding no extracted text) and failed.
+
+`scanned` counts a document once per scan pass, and `resume` restarts its scan from the beginning, so a
+run that was paused reports a `scanned` larger than the corpus. The other counters are not affected.
+
+To move a corpus onto a new embedding model without search degrading:
+
+1. add the current model to `RAG_EMBEDDING_ADDITIONAL_MODELS` and set `EMBEDDING_MODEL` to the new one,
+   then restart `rag-service` and the ingesters. Both types are now queried, each in its own space.
+2. start the backfill and watch `status` until it reports `COMPLETED`.
+3. remove the old model from `RAG_EMBEDDING_ADDITIONAL_MODELS`.
+
+Coexisting types must share vector dimensionality, and therefore the same index field and similarity
+metric. That is a property of the embeddings index rather than of this configuration, and it is what
+makes scores from different types directly comparable: they are merged as hxpr reported them, with no
+per-type rescaling, so `SEARCH_HYBRID_MIN_SCORE` and `RAG_RETRIEVAL_GRADING_MIN_SCORE` keep their meaning
+while more than one type is live.
+
+`type-discovery` reads the types present from `sysembed_type` on the embedding rows. There is no
+aggregation endpoint over the embeddings index, so it scans pages of rows and stops at a ceiling, which
+makes it a sample on a large corpus: a type holding a very small share of one can go unnoticed, and an
+undiscovered type is not queried. The log says which happened, either `Corpus holds N embedding types ...
+the whole index` or a line reporting that discovery stopped at its ceiling. Name the models in
+`additional-models` if you need the set pinned rather than inferred.
+
+Documents reported as `skippedNoText` hold no extracted-text mirror and need a full re-sync rather than
+a backfill. The job deliberately does not update the content fingerprint, so the next content sync
+re-chunks and re-embeds each backfilled document from its source.
 
 ---
 

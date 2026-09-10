@@ -156,6 +156,21 @@ services:
       # repository admin accounts so `cleval feedback import`, which needs the whole corpus, works
       # against it. Clear it for a deployment where no one aggregates feedback.
       RAG_FEEDBACK_OPERATOR_USERS: ${RAG_FEEDBACK_OPERATOR_USERS:-admin,Administrator}
+      # Multi-embedding-type retrieval. Empty by default, which leaves the vector leg on the single
+      # wildcard call it has always made. List a retired model here during a migration and its
+      # embedding type is queried in its own vector space, which is what stops recall dropping for
+      # documents not yet moved onto the new model. Comma separated; coexisting types must share
+      # vector dimensionality.
+      RAG_EMBEDDING_ADDITIONAL_MODELS: ${RAG_EMBEDDING_ADDITIONAL_MODELS:-}
+      RAG_EMBEDDING_TYPE_DISCOVERY_ENABLED: ${RAG_EMBEDDING_TYPE_DISCOVERY_ENABLED:-true}
+      RAG_EMBEDDING_TYPE_DISCOVERY_TTL_SECONDS: ${RAG_EMBEDDING_TYPE_DISCOVERY_TTL_SECONDS:-300}
+      # Re-embeds the corpus into the configured type at a controlled rate while the previous type
+      # keeps answering queries. Off by default: it writes to every document and spends the embedding
+      # throughput the ingesters need. The endpoints also require an account named below, so enabling
+      # the flag alone does not open them.
+      RAG_EMBEDDING_BACKFILL_ENABLED: ${RAG_EMBEDDING_BACKFILL_ENABLED:-false}
+      RAG_EMBEDDING_BACKFILL_DOCS_PER_MINUTE: ${RAG_EMBEDDING_BACKFILL_DOCS_PER_MINUTE:-60}
+      RAG_EMBEDDING_BACKFILL_OPERATOR_USERS: ${RAG_EMBEDDING_BACKFILL_OPERATOR_USERS:-admin,Administrator}
       HXPR_USERNAME: ${HXPR_USERNAME}
       HXPR_PASSWORD: ${HXPR_PASSWORD}
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
@@ -249,10 +264,7 @@ services:
       # Verbatim matching for identifier-like queries. An extra pass restricted to chunks holding the
       # identifier literally, added only when the query names one. Distinct from expansion: the problem
       # with a short alphanumeric token is that it is rare, not that the query is ambiguous, which is why
-      # rewording it does not help. Off by default, and measured: on the identifier golden set every
-      # sweep point scored recall@10 and mrr of 1.0, flag-off included, so the keyword leg already
-      # resolves these queries there and the pass costs about +47 ms on search p50 for no gain. Turn it
-      # on only against a corpus where an identifier repeats across documents.
+      # rewording it does not help. Off by default until the identifier sweep confirms the gain.
       RAG_VERBATIM_IDENTIFIER_ENABLED: ${RAG_VERBATIM_IDENTIFIER_ENABLED:-false}
       RAG_VERBATIM_IDENTIFIER_MIN_LENGTH: ${RAG_VERBATIM_IDENTIFIER_MIN_LENGTH:-3}
       RAG_VERBATIM_IDENTIFIER_MAX_TERMS: ${RAG_VERBATIM_IDENTIFIER_MAX_TERMS:-2}
