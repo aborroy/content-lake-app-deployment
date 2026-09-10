@@ -246,6 +246,16 @@ services:
       # "useless" -- but it does not go on by default on a ranking regression.
       RAG_QUERY_DECOMPOSITION_ENABLED: ${RAG_QUERY_DECOMPOSITION_ENABLED:-false}
       RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS: ${RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS:-4}
+      # Verbatim matching for identifier-like queries. An extra pass restricted to chunks holding the
+      # identifier literally, added only when the query names one. Distinct from expansion: the problem
+      # with a short alphanumeric token is that it is rare, not that the query is ambiguous, which is why
+      # rewording it does not help. Off by default, and measured: on the identifier golden set every
+      # sweep point scored recall@10 and mrr of 1.0, flag-off included, so the keyword leg already
+      # resolves these queries there and the pass costs about +47 ms on search p50 for no gain. Turn it
+      # on only against a corpus where an identifier repeats across documents.
+      RAG_VERBATIM_IDENTIFIER_ENABLED: ${RAG_VERBATIM_IDENTIFIER_ENABLED:-false}
+      RAG_VERBATIM_IDENTIFIER_MIN_LENGTH: ${RAG_VERBATIM_IDENTIFIER_MIN_LENGTH:-3}
+      RAG_VERBATIM_IDENTIFIER_MAX_TERMS: ${RAG_VERBATIM_IDENTIFIER_MAX_TERMS:-2}
       # Self-RAG gate. RAG_RETRIEVAL_GRADING_MIN_SCORE is on the fusion's own scale, not cosine's:
       # under the committed weighted/minmax strategy hit scores span 0-1, but under rrf they span
       # roughly 0.02-0.03, so a threshold carried over from one strategy discards everything under the
