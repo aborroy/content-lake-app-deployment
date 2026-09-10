@@ -61,6 +61,11 @@ services:
       INGESTION_RECONCILE_MAX_DELETES: ${INGESTION_RECONCILE_MAX_DELETES:-1000}
       INGESTION_RECONCILE_MAX_SEEN_IDS: ${INGESTION_RECONCILE_MAX_SEEN_IDS:-200000}
       INGESTION_RECONCILE_PAGE_SIZE: ${INGESTION_RECONCILE_PAGE_SIZE:-200}
+    volumes:
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
+      # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
+      # writing to its own plugin directory.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -109,6 +114,11 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+    volumes:
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
+      # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
+      # writing to its own plugin directory.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -352,6 +362,11 @@ services:
       NUXEO_BATCH_RECONCILE_MAX_DELETES: ${NUXEO_BATCH_RECONCILE_MAX_DELETES:-1000}
       NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS: ${NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
       NUXEO_BATCH_RECONCILE_PAGE_SIZE: ${NUXEO_BATCH_RECONCILE_PAGE_SIZE:-200}
+    volumes:
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
+      # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
+      # writing to its own plugin directory.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -410,6 +425,10 @@ services:
     volumes:
       # Mount the host directory to ingest (read-only). Override with FILESYSTEM_HOST_PATH.
       - "${FILESYSTEM_HOST_PATH:-./filesystem-data}:/data/filesystem:ro"
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
+      # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
+      # writing to its own plugin directory.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -452,10 +471,14 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - nuxeo-live-audit-data:/data
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
+      # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
+      # writing to its own plugin directory.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       hxpr-app:
         condition: service_healthy

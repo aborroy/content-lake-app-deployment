@@ -91,6 +91,27 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 Always run from the project root using `make` or `docker compose` -- the included files are not
 designed to be run in isolation.
 
+## Connector Plugins
+
+Every ingester mounts [`connectors/`](connectors/) read-only at `/opt/content-lake/connectors` and scans it
+at startup, so a source connector can be shipped as a jar instead of as a module of `content-lake-app`.
+That removes the whole ceremony an in-tree source needs -- a Maven module, a line in an intermediate POM,
+and a COPY line in each of the six service Dockerfiles, any one of which breaks that service's build when
+forgotten.
+
+```bash
+cp my-cmis-connector-1.0.0.jar connectors/
+docker compose --profile alfresco up -d --force-recreate batch-ingester
+curl http://localhost:9090/api/connectors -u admin:admin   # what loaded, from which jar, what failed
+```
+
+The directory is empty by default and an empty directory changes nothing. Override the mount with
+`CONNECTOR_PLUGIN_PATH`. A jar that cannot be read, or whose configuration does not satisfy the schema it
+publishes, is reported by that endpoint and in the log without stopping the ingester.
+
+Note that the connector's own settings still have to reach the service. A plugin declares the property
+names it needs and reads them from the ingester's environment, so they are passed like any other setting.
+
 ## Documentation
 
 | Doc | Contents |
