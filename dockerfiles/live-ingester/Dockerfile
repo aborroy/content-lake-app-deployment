@@ -20,6 +20,8 @@ COPY --from=code nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom
 COPY --from=code filesystem/pom.xml filesystem/pom.xml
 COPY --from=code filesystem/content-lake-source-filesystem/pom.xml filesystem/content-lake-source-filesystem/pom.xml
 COPY --from=code filesystem/filesystem-batch-ingester/pom.xml filesystem/filesystem-batch-ingester/pom.xml
+COPY --from=code connector/pom.xml connector/pom.xml
+COPY --from=code connector/connector-batch-ingester/pom.xml connector/connector-batch-ingester/pom.xml
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -DskipTests -pl alfresco/alfresco-live-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src

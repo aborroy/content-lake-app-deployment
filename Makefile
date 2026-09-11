@@ -10,6 +10,15 @@
 #     docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester
 #     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured
 #      with FILESYSTEM_SYNC_USERNAME/FILESYSTEM_SYNC_PASSWORD; both are required to start)
+#   Plugin connector (opt-in): add the 'connector' profile to a base stack, e.g.
+#     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+#       docker compose --profile alfresco --profile connector up -d --build connector-batch-ingester
+#     (ingests through a connector jar in ./connectors, on :9096. The jar is its only source, so the
+#      service fails to start with that directory empty. Supply the connector's own settings as
+#      environment variables using the names its schema declares -- hyphens become underscores, so
+#      `sample-directory.root-path` is SAMPLE_DIRECTORY_ROOT_PATH -- then POST /api/sync/configured.
+#      GET /api/connectors lists what loaded and anything that failed to;
+#      ../content-lake-app/connector-archetype/examples has a working connector to build)
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)
@@ -178,14 +187,14 @@ verify-profiles: ## Assert every opt-in profile stays opt-in (no service leaks i
 	@fail=0; \
 	for profile in alfresco nuxeo full demo; do \
 	  services=$$($(DC) --profile $$profile config --services 2>/dev/null | sort | tr '\n' ' '); \
-	  for optin in otel-lgtm filesystem-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md; do \
+	  for optin in otel-lgtm filesystem-batch-ingester connector-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md; do \
 	    case " $$services " in \
 	      *" $$optin "*) echo "FAIL: $$optin is in the '$$profile' profile but should be opt-in only"; fail=1 ;; \
 	    esac; \
 	  done; \
 	  echo "ok: profile '$$profile' has no opt-in service"; \
 	done; \
-	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse"; do \
+	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "connector:connector-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse"; do \
 	  profile=$${pair%%:*}; service=$${pair##*:}; \
 	  services=$$($(DC) --profile demo --profile $$profile config --services 2>/dev/null | tr '\n' ' '); \
 	  case " $$services " in \

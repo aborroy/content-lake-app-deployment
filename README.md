@@ -60,6 +60,28 @@ curl -u "$FILESYSTEM_SYNC_USERNAME:$FILESYSTEM_SYNC_PASSWORD" \
   -X POST 'http://localhost/api/sync/configured?sourceType=filesystem'
 ```
 
+The `connector-batch-ingester` is a second opt-in service, in its own `connector` profile, and it is the
+one that ingests through a connector plugin. A jar in [`connectors/`](connectors/) is discovered by every
+ingester, but the Alfresco, Nuxeo and filesystem ingesters each drive a client they were compiled against,
+so for them a mounted connector is only listed. This service takes its client, scope rules and optionally
+its extractor from the jar, which means a new source needs no Maven module, no Dockerfile edit and no
+change to `compose.content-lake.yaml`:
+
+```bash
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  docker compose --profile alfresco --profile connector up -d --build connector-batch-ingester
+
+curl -u admin:admin http://localhost:9096/api/connectors
+curl -u admin:admin -X POST http://localhost:9096/api/sync/configured
+```
+
+Its source is that jar, so with `connectors/` empty it fails to start rather than idling. Set
+`CONNECTOR_SOURCE_TYPE` when several jars are mounted, and `CONNECTOR_ROOTS` when the connector does not
+name its own root container. Its sync API is guarded the same way the filesystem one is, from
+`CONNECTOR_SYNC_USERNAME` and `CONNECTOR_SYNC_PASSWORD`, with no defaults.
+[`connectors/README.md`](connectors/README.md) has the rest, including how a connector's own settings are
+passed in.
+
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
 
 ```bash
@@ -84,7 +106,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, opensearch-dashboards (`debug` profile) |
-| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester |
+| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester, connector-batch-ingester |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 | [`compose.observability.yaml`](compose.observability.yaml) | Trace backend for the RAG spans: otel-lgtm (`observability` profile) |
 
@@ -548,6 +570,23 @@ A non-zero `Failed` count means at least one pipeline stage is broken. The scrip
 `smoke-test-<timestamp>.log` file during the run containing the full output including top-3
 search results for every failed assertion; this file is deleted at the end of a successful
 run. If the script is interrupted or exits with failures, the log file is kept for inspection.
+
+## Connector Suite
+
+`test/test-connector.sh` proves the plugin path end to end: it builds the sample connector from
+`../content-lake-app/connector-archetype/examples/sample-directory-connector` inside a Maven container,
+drops the jar into `connectors/`, starts `connector-batch-ingester` on top of a base stack that is already
+running, triggers a sync and asserts the fixture documents come back out of semantic search.
+
+Opt-in, like the profile it exercises, so it is not a phase of `test/run-tests.sh`. It needs a base stack
+up, the AI backend on :12434, and Docker.
+
+```bash
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  RAG_AUTH=admin:admin ./test/test-connector.sh
+```
+
+It removes the service and the jar on exit; pass `KEEP_RUNNING=true` to keep both for poking at.
 
 ## Deploying to AWS EC2
 

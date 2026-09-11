@@ -375,6 +375,88 @@ services:
     networks:
       - stack
 
+  connector-batch-ingester:
+    # Opt-in profile only: combine with a base stack that provides hxpr, e.g.
+    #   docker compose --profile alfresco --profile connector up -d
+    #
+    # The ingester whose source is a plugin connector (#132). Unlike every other ingester it builds no
+    # source adapter: the client comes from a jar in ./connectors at startup. With that directory empty
+    # this service fails to start, deliberately, because it has nothing it could ingest from.
+    #
+    # A connector's own settings are passed here like any other environment variable, using the names its
+    # schema declares. Hyphens become underscores, so `sample-directory.root-path` is
+    # SAMPLE_DIRECTORY_ROOT_PATH. GET /api/connectors/schema lists what the mounted connector wants.
+    profiles: [connector]
+    image: content-lake-app/connector-batch-ingester:local
+    build:
+      context: .
+      dockerfile: dockerfiles/connector-batch-ingester/Dockerfile
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
+    ports:
+      # Published, unlike filesystem-batch-ingester, which is reached through the proxy's
+      # `?sourceType=` map. That map cannot serve this service: the key would have to be the source type
+      # the mounted jar declares, which is unknown when the nginx config is rendered. A published port
+      # also keeps /api/connectors reachable while diagnosing a jar that did not load.
+      - "${CONNECTOR_PORT:-9096}:9096"
+    environment:
+      # Which loaded connector to ingest with. Only needed when several jars are mounted.
+      CONNECTOR_SOURCE_TYPE: ${CONNECTOR_SOURCE_TYPE:-}
+      # Containers to walk, comma separated. Empty asks the connector where to start, which is what a
+      # connector implementing ContentSourceClient.getRootNodeId() answers.
+      CONNECTOR_ROOTS: ${CONNECTOR_ROOTS:-}
+      CONNECTOR_PAGE_SIZE: ${CONNECTOR_PAGE_SIZE:-100}
+      CONNECTOR_MAX_DEPTH: ${CONNECTOR_MAX_DEPTH:-50}
+      # warn starts even when a connector's configuration does not satisfy its schema, reporting it on
+      # GET /api/connectors instead. fail (the default) refuses to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION:-fail}
+      # Settings for the example connector in ../content-lake-app/connector-archetype/examples. Harmless
+      # when a different connector is mounted: an unrecognised variable is simply never read.
+      SAMPLE_DIRECTORY_ROOT_PATH: ${SAMPLE_DIRECTORY_ROOT_PATH:-/data/connector}
+      SAMPLE_DIRECTORY_SOURCE_ID: ${SAMPLE_DIRECTORY_SOURCE_ID:-sample-directory}
+      # No repository transform service backs a plugin connector, so extraction is in-process Tika
+      # unless an engine is configured. A connector that converts its own content bypasses this.
+      EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
+      EXTRACTION_ENGINE_TIMEOUT_MS: ${EXTRACTION_ENGINE_TIMEOUT_MS:-300000}
+      EXTRACTION_FORMAT: ${EXTRACTION_FORMAT:-plaintext}
+      HXPR_URL: http://hxpr-app:8080
+      HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID}
+      HXPR_TARGET_PATH: ${HXPR_CONNECTOR_TARGET_PATH:-/connector-sync}
+      HXPR_USERNAME: ${HXPR_USERNAME}
+      HXPR_PASSWORD: ${HXPR_PASSWORD}
+      # Guards this ingester's own sync API. A plugin connector's credentials authenticate it to its
+      # source and say nothing about who may trigger a re-ingest, so one configured account guards the
+      # API. No compose default: the container refuses to start without both.
+      CONNECTOR_SYNC_USERNAME: ${CONNECTOR_SYNC_USERNAME}
+      CONNECTOR_SYNC_PASSWORD: ${CONNECTOR_SYNC_PASSWORD}
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
+      SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
+      SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+      # Off by default, and more cautiously than for the filesystem source: the sweep's scope comes from
+      # the source paths discovery resolved, and a connector whose nodes report `/` as their path would
+      # hand it everything under this source's target path. Check what a run reports as
+      # resolvedRootPaths before turning this on.
+      CONNECTOR_BATCH_RECONCILE_ENABLED: ${CONNECTOR_BATCH_RECONCILE_ENABLED:-false}
+      CONNECTOR_BATCH_RECONCILE_MAX_DELETE_RATIO: ${CONNECTOR_BATCH_RECONCILE_MAX_DELETE_RATIO:-0.5}
+      CONNECTOR_BATCH_RECONCILE_MAX_DELETES: ${CONNECTOR_BATCH_RECONCILE_MAX_DELETES:-1000}
+      CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS: ${CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
+      CONNECTOR_BATCH_RECONCILE_PAGE_SIZE: ${CONNECTOR_BATCH_RECONCILE_PAGE_SIZE:-200}
+    volumes:
+      # Content for a connector that reads a mounted path, such as the sample directory connector.
+      # Override with CONNECTOR_HOST_PATH. A connector that talks to a remote repository ignores it.
+      - "${CONNECTOR_HOST_PATH:-./filesystem-data}:/data/connector:ro"
+      # Connector plugins (#124): any jar dropped in here is discovered at startup. For this service the
+      # directory is not optional, since the jar it finds here is its only source.
+      - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      hxpr-app:
+        condition: service_healthy
+    networks:
+      - stack
+
   filesystem-batch-ingester:
     # Opt-in profile only: combine with a base stack that provides hxpr, e.g.
     #   docker compose --profile alfresco --profile filesystem up -d

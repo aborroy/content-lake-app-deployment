@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
-# Build context: this directory (dockerfiles/nuxeo-live-ingester)
+# Build context: this directory (dockerfiles/connector-batch-ingester)
 # App source supplied via additional_context named "code" (CONTENT_LAKE_GIT_CONTEXT)
+#
+# This service builds no source adapter: its connector arrives at runtime as a jar in
+# /opt/content-lake/connectors. Only spi, core and the ingester itself are copied below.
 FROM maven:3.9.11-eclipse-temurin-25-alpine AS build
 WORKDIR /workspace
 COPY --from=code pom.xml .
@@ -23,29 +26,27 @@ COPY --from=code filesystem/filesystem-batch-ingester/pom.xml filesystem/filesys
 COPY --from=code connector/pom.xml connector/pom.xml
 COPY --from=code connector/connector-batch-ingester/pom.xml connector/connector-batch-ingester/pom.xml
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl nuxeo/nuxeo-live-ingester -am dependency:go-offline
+    mvn -q -DskipTests -pl connector/connector-batch-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
 COPY --from=code common/content-lake-core/src common/content-lake-core/src
-COPY --from=code nuxeo/content-lake-source-nuxeo/src nuxeo/content-lake-source-nuxeo/src
-COPY --from=code nuxeo/nuxeo-live-ingester/src nuxeo/nuxeo-live-ingester/src
+COPY --from=code connector/connector-batch-ingester/src connector/connector-batch-ingester/src
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl nuxeo/nuxeo-live-ingester -am package
+    mvn -q -DskipTests -pl connector/connector-batch-ingester -am package
 RUN mkdir -p /layers \
- && JAR="$(ls -1 nuxeo/nuxeo-live-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+ && JAR="$(ls -1 connector/connector-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
 FROM eclipse-temurin:25-jre-alpine
 RUN apk add --no-cache gcompat
 RUN addgroup -S app && adduser -S -G app app
-RUN mkdir -p /data && chown app:app /data
 WORKDIR /app
 COPY --from=build /layers/dependencies/ ./
 COPY --from=build /layers/snapshot-dependencies/ ./
 COPY --from=build /layers/spring-boot-loader/ ./
 COPY --from=build /layers/application/ ./
 USER app
-EXPOSE 9094
+EXPOSE 9096
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO- http://localhost:9094/actuator/health || exit 1
+  CMD wget -qO- http://localhost:9096/actuator/health || exit 1
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport -Dfile.encoding=UTF-8"
 ENTRYPOINT ["java","org.springframework.boot.loader.launch.JarLauncher"]
