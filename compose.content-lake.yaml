@@ -278,6 +278,13 @@ services:
       RAG_VERBATIM_IDENTIFIER_ENABLED: ${RAG_VERBATIM_IDENTIFIER_ENABLED:-false}
       RAG_VERBATIM_IDENTIFIER_MIN_LENGTH: ${RAG_VERBATIM_IDENTIFIER_MIN_LENGTH:-3}
       RAG_VERBATIM_IDENTIFIER_MAX_TERMS: ${RAG_VERBATIM_IDENTIFIER_MAX_TERMS:-2}
+      # Per-document cap on a result set. topK is a chunk budget and one document contributes all of its
+      # chunks, so a long document can fill it alone and crowd every other document out whatever their
+      # own scores are. Over-fetching gives the cap something to promote. Off by default until the
+      # document-diversity sweep confirms the gain.
+      RAG_DOCUMENT_DIVERSITY_ENABLED: ${RAG_DOCUMENT_DIVERSITY_ENABLED:-false}
+      RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT: ${RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT:-3}
+      RAG_DOCUMENT_DIVERSITY_OVER_FETCH_FACTOR: ${RAG_DOCUMENT_DIVERSITY_OVER_FETCH_FACTOR:-3}
       # Self-RAG gate. RAG_RETRIEVAL_GRADING_MIN_SCORE is on the fusion's own scale, not cosine's:
       # under the committed weighted/minmax strategy hit scores span 0-1, but under rrf they span
       # roughly 0.02-0.03, so a threshold carried over from one strategy discards everything under the
