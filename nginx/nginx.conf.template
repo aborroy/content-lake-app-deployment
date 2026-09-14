@@ -3,7 +3,7 @@
 # Variables injected by docker compose (set per Makefile target):
 #   NGINX_SYNC_DEFAULT_BACKEND  e.g. batch-ingester:9090 or nuxeo-batch-ingester:9093
 #   NGINX_ROOT_DIRECTIVE        e.g. "return 302 /aca/;"  or  "proxy_pass http://content-lake-app-ui:80;"
-#   SERVER_NAME                 e.g. localhost (default) or axovia.alfdemo.com
+#   SERVER_NAME                 e.g. localhost (default) or archer.alfdemo.com
 #
 # HTTPS is handled by the compose entrypoint: when USE_HTTPS=true and
 # /etc/nginx/certs/server.crt exists the HTTP block emits a redirect to HTTPS
