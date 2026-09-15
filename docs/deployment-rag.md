@@ -113,6 +113,28 @@ results: the hxpr port must therefore never be reachable by end users or agents,
 query it directly with no filter at all. When no permission source can be resolved for a caller the
 predicate matches nothing rather than everything.
 
+### Which sources the filter covers
+
+A clause is built per source, so a source nothing names contributes no clause and none of its
+documents can be matched. The set of sources is discovered from the index: one terms aggregation over
+`cin_sourceId`, whose values are the stored `<sourceType>:<sourceId>` pairs, refreshed every 30 seconds.
+A source ingested into after rag-service started therefore becomes searchable without a restart, within
+that window, which is what a connector jar dropped into a running deployment needs.
+
+Two consequences worth knowing before deploying a source other than Alfresco or Nuxeo, which today
+means the filesystem connector or any plugin connector on `connector-batch-ingester`:
+
+- **Group memberships cannot be expanded for such a source.** rag-service has a group directory client
+  for Alfresco and for Nuxeo and no way to ask a third source. Its clause is therefore built from the
+  caller's own authorities: documents carrying `__Everyone__` and documents granted to the caller by
+  name are retrievable, and documents granted to a *group* are not. That is deliberate, because the
+  alternative is over-sharing, and it is logged once per source at WARN. A source whose ACLs are
+  group-based needs `RAG_PERMISSION_SOURCE_IDS` plus a group resolver, which is a code change.
+- **`RAG_PERMISSION_SOURCE_IDS` disables discovery entirely.** Pinning it was the only way to make a
+  third source retrievable before this behaviour existed, and a pin that omits a source hides that
+  source's documents. Leave it unset unless the set must not be inferred; when it is set, rag-service
+  logs at startup which indexed sources the pin fails to cover.
+
 Neither input to that filter has a permissive fallback. A request that reaches a search endpoint with
 no authenticated principal is rejected with 401 rather than answered under a placeholder name, and a
 source whose group directory is unreachable is handled according to
