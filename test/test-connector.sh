@@ -26,9 +26,10 @@
 #   APP_SOURCE      Path to the content-lake-app checkout (default: ../content-lake-app). Also becomes
 #                   CONTENT_LAKE_GIT_CONTEXT, so the image is built from that checkout rather than from
 #                   the GitHub default pinned in .env
-#   POLL_DEADLINE_S Seconds to wait for a document to become retrievable (default: 300)
+#   POLL_DEADLINE_S Seconds to wait for a document to become retrievable (default: 60)
 #   BASE_PROFILE    Base profile activated alongside 'connector', needed because the service declares
 #                   depends_on hxpr-app (default: alfresco)
+#   BUILD_JAR       "true" to rebuild the connector jar even when one exists (default: false)
 #   KEEP_RUNNING    "true" to leave the service and the jar in place afterwards (default: false)
 
 set -uo pipefail
@@ -37,8 +38,10 @@ HOST="${HOST:-localhost}"
 USE_HTTPS="${USE_HTTPS:-false}"
 RAG_AUTH="${RAG_AUTH:-admin:admin}"
 APP_SOURCE="${APP_SOURCE:-../content-lake-app}"
-POLL_DEADLINE_S="${POLL_DEADLINE_S:-300}"
+POLL_DEADLINE_S="${POLL_DEADLINE_S:-60}"
 KEEP_RUNNING="${KEEP_RUNNING:-false}"
+# "true" rebuilds the connector jar even when one exists; see the build section for why that is opt-in.
+BUILD_JAR="${BUILD_JAR:-false}"
 SYNC_USER="${CONNECTOR_SYNC_USERNAME:?CONNECTOR_SYNC_USERNAME is required}"
 SYNC_PASS="${CONNECTOR_SYNC_PASSWORD:?CONNECTOR_SYNC_PASSWORD is required}"
 SYNC_AUTH="${SYNC_USER}:${SYNC_PASS}"
@@ -131,31 +134,36 @@ EOF
 FIXTURE_COUNT=3
 info "Created ${FIXTURE_COUNT} fixture documents in ${FIXTURE_DIR}"
 
-# ── Build the connector, the way a connector author would ───────────────────────
-section "Build the sample connector"
-# In a container, so the suite needs no host Maven or JDK 25. content-lake-spi has to be installed
-# first: the example depends on it as `provided` and is not part of the reactor, on purpose.
-if docker run --rm \
-  -v "$(cd "$APP_SOURCE" && pwd):/src" \
-  -v "connector-test-m2:/root/.m2" \
-  -w /src maven:3.9.11-eclipse-temurin-25-alpine \
-  sh -c "mvn -q -B -pl common/content-lake-spi -am install -DskipTests \
-      && mvn -q -B -f connector-archetype/examples/sample-directory-connector/pom.xml package"; then
-  pass "T1: the sample connector builds against content-lake-spi alone"
+# ── The connector jar, built only when there is not one ─────────────────────────
+section "The sample connector jar"
+# A jar is a build artefact: rebuilding it here (installing content-lake-spi into a container-local
+# repository first, since the example depends on it as `provided` and is deliberately outside the
+# reactor) costs two to four minutes per run to re-derive what `mvn package` produced. Build only when
+# it is missing, and BUILD_JAR=true to force it when the connector's source has changed.
+BUILT_JAR="${EXAMPLE_DIR}/target/${JAR_NAME}"
+if [ "$BUILD_JAR" = "true" ] || [ ! -f "$BUILT_JAR" ]; then
+  info "Building ${JAR_NAME} (no jar present, or BUILD_JAR=true)"
+  # In a container, so the suite needs no host Maven or JDK 25.
+  docker run --rm \
+    -v "$(cd "$APP_SOURCE" && pwd):/src" \
+    -v "connector-test-m2:/root/.m2" \
+    -w /src maven:3.9.11-eclipse-temurin-25-alpine \
+    sh -c "mvn -q -B -pl common/content-lake-spi -am install -DskipTests \
+        && mvn -q -B -f connector-archetype/examples/sample-directory-connector/pom.xml package" \
+    || { fail "T1: the sample connector failed to build"; exit 1; }
+fi
+
+if [ -f "$BUILT_JAR" ]; then
+  pass "T1: ${JAR_NAME} is present, and builds against content-lake-spi alone"
 else
-  fail "T1: the sample connector failed to build"
+  fail "T1: ${JAR_NAME} was not produced"
   exit 1
 fi
 
-if [ -f "${EXAMPLE_DIR}/target/${JAR_NAME}" ]; then
-  cp "${EXAMPLE_DIR}/target/${JAR_NAME}" "connectors/${JAR_NAME}"
-  # The container runs as a non-root user and mounts this directory read-only.
-  chmod 644 "connectors/${JAR_NAME}"
-  pass "T2: jar copied into ./connectors"
-else
-  fail "T2: ${JAR_NAME} was not produced"
-  exit 1
-fi
+cp "$BUILT_JAR" "connectors/${JAR_NAME}"
+# The container runs as a non-root user and mounts this directory read-only.
+chmod 644 "connectors/${JAR_NAME}"
+pass "T2: jar copied into ./connectors"
 
 # ── Start the ingester ─────────────────────────────────────────────────────────
 section "Start connector-batch-ingester"
@@ -298,22 +306,16 @@ fi
 
 # ── Retrievable, which is the whole point ──────────────────────────────────────
 section "Retrieval"
-# The RAG permission filter builds one clause per *resolvable* source: auto-discovered Alfresco source ids
-# plus the configured Nuxeo one. A plugin connector is neither, so on a stack whose other sources hold no
-# documents (this one: Alfresco is up but empty, Nuxeo absent) no clause is built at all and the filter
-# falls back to a source id that matches nothing -- correctly, since the absence of a decision must not
-# become the absence of a filter. Pinning rag.permission.source-ids gives the connector its clause.
+# No pin. The permission filter builds one clause per source it can name, and since #133 it names every
+# source in the index: it discovers them from a terms aggregation over cin_sourceId, whose values carry
+# the source type. So a plugin connector gets a clause as ingested, with no configuration at all.
 #
-# Not a workaround for a defect in this connector: the same is true of any source rag-service does not
-# know by name. In a deployment where Alfresco or Nuxeo also holds documents, that source's clause admits
-# these documents too, because the public part of a clause is not source-restricted.
-info "Pinning rag.permission.source-ids=${SOURCE_TYPE} and recreating rag-service"
-RAG_PINNED=1
-RAG_PERMISSION_SOURCE_IDS="$SOURCE_TYPE" dc up -d --no-deps --no-build rag-service >/dev/null 2>&1
-for _ in $(seq 1 24); do
-  curl $CURL_OPTS -s -o /dev/null -u "$RAG_AUTH" "${RAG_URL}/health" && break
-  sleep 5
-done
+# This used to require pinning rag.permission.source-ids to the connector's source id, because the only
+# sources rag-service could name were Alfresco and Nuxeo. On a stack whose other sources hold no documents
+# (this one: Alfresco is up but empty, Nuxeo absent) nothing was resolved, the filter fell back to a source
+# id matching nothing, and every query returned zero results -- correctly, since the absence of a decision
+# must not become the absence of a filter, but for the wrong reason. Asserting retrievability unpinned is
+# what keeps that regression visible; T19 below still covers the pinned path, which remains supported.
 
 # Matched on chunkText and on the cin_sourceId prefix, which are the fields this endpoint actually
 # returns: there is no sourceType on a semantic-search result, and the text field is chunkText.
@@ -381,6 +383,23 @@ if [ "${short_circuits%.*}" -ge "$FIXTURE_COUNT" ]; then
   pass "T18: the second pass reused stored content for all ${FIXTURE_COUNT} documents (shortcircuits=${short_circuits}, reprocesses=${reprocesses})"
 else
   fail "T18: content reuse did not short-circuit the second pass (shortcircuits=${short_circuits}, reprocesses=${reprocesses}, expected at least ${FIXTURE_COUNT})"
+fi
+
+# ── The pinned path still works ────────────────────────────────────────────────
+section "Pinned permission sources"
+# Pinning is still supported and still documented, for a deployment that must not have the set inferred.
+# What it now costs is stated in docs/deployment-rag.md: a pin disables discovery, so a pin that omits an
+# indexed source hides that source's documents.
+info "Pinning rag.permission.source-ids=${SOURCE_TYPE} and recreating rag-service"
+RAG_PINNED=1
+RAG_PERMISSION_SOURCE_IDS="$SOURCE_TYPE" dc up -d --no-deps --no-build rag-service >/dev/null 2>&1
+for _ in $(seq 1 24); do
+  curl $CURL_OPTS -s -o /dev/null -u "$RAG_AUTH" "${RAG_URL}/health" && break
+  sleep 5
+done
+if find_document "How many crates of powdered ginger went through the Rotterdam depot?" \
+  "$RUN_TAG" "quarterly-review.txt with rag.permission.source-ids pinned" "T19"; then
+  :
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────────

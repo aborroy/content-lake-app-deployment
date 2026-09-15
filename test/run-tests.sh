@@ -258,8 +258,10 @@ wait_for_url "$BASE/api/sync/status?sourceType=nuxeo" 'Administrator:Administrat
   || warn "nuxeo-batch-ingester /api/sync/status not returning 200; proceeding anyway"
 ok "Batch ingesters are up"
 
-info "Waiting 30 s for full-stack ingesters to initialise …"
-sleep 30
+# The readiness probes above are the gate; this is only the live ingesters' broker subscription, which is
+# not observable over HTTP. 10s covers it, and a longer blind sleep just adds to every run.
+info "Waiting 10 s for the live ingesters to subscribe …"
+sleep 10
 
 banner "Running full-stack RAG suite"
 FULL_RC=0

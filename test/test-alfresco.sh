@@ -32,8 +32,11 @@ fi
 ALF_BASE="${BASE}/alfresco/api/-default-/public/alfresco/versions/1"
 SYNC_URL="${BASE}/api/sync"
 RAG_URL="${BASE}/api/rag"
-# Deadline (seconds) for polling a just-synced document into searchable state. Configurable so slow
-# inference backends can extend it without editing the suite.
+# Deadline (seconds) for polling a just-synced document into searchable state. Longer than the 60s the
+# connector suites use, and measured rather than guessed: this phase waits on embedding, which on a local
+# Docker Model Runner backend runs seconds per document and slows further as a run accumulates state.
+# Every use polls, so the deadline is only paid when something is actually wrong. Configurable so a slower
+# inference backend can extend it without editing the suite.
 POLL_DEADLINE_S="${POLL_DEADLINE_S:-180}"
 LIVE_URL="http://${HOST}:9092/api/live/status"   # direct port — may not be exposed
 # Deployment root, so a section that needs to stop a service can reach docker compose. run-tests.sh
@@ -885,9 +888,9 @@ EOF
 LIVE_NODE_ID=$(upload_file "$FOLDER_ID" "$TMPDIR_DATA/live-test-v1.txt" "live-test.txt" "text/plain")
 if [ -n "$LIVE_NODE_ID" ]; then
   pass "C1a: Live test document created (nodeId=$LIVE_NODE_ID)"
-  info "Waiting 20 s for live event propagation and embedding …"
-  sleep 20
-  rag_find_node "xylophone-verdant-cascade-47z version one" "$LIVE_NODE_ID" "C1b" "live-test.txt after create event"
+  # Polled, not slept: a flat 20s is both slower than the common case and flakier than the slow one.
+  wait_for_node_present "xylophone-verdant-cascade-47z version one" "$LIVE_NODE_ID" "C1b" \
+    "live-test.txt after create event"
 else
   fail "C1: Failed to create live test document"
 fi
@@ -907,9 +910,8 @@ EOF
     --data-binary "@$TMPDIR_DATA/live-test-v2.txt" 2>/dev/null || echo 000)
   if [ "$code" = "200" ]; then
     pass "C2a: Document content updated (HTTP 200)"
-    info "Waiting 20 s for update event propagation …"
-    sleep 20
-    rag_find_node "tangerine-stellar-vortex-88q version two" "$LIVE_NODE_ID" "C2b" "live-test.txt after update event"
+    wait_for_node_present "tangerine-stellar-vortex-88q version two" "$LIVE_NODE_ID" "C2b" \
+      "live-test.txt after update event"
   else
     fail "C2: Content update returned HTTP $code"
   fi
@@ -921,6 +923,8 @@ if [ -n "$LIVE_NODE_ID" ]; then
     "$ALF_BASE/nodes/$LIVE_NODE_ID" 2>/dev/null || echo 000)
   if [ "$code" = "204" ]; then
     pass "C3a: Document deleted (HTTP 204)"
+    # The one wait that has to be a wait: an absence cannot be polled towards. Deletion propagates
+    # through the event listener and then the index, and 20s is what was measured to cover it.
     info "Waiting 20 s for delete event propagation …"
     sleep 20
     rag_absent_node "tangerine-stellar-vortex-88q" "$LIVE_NODE_ID" "C3b" "live-test.txt after delete event"
