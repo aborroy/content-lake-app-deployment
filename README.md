@@ -134,6 +134,11 @@ publishes, is reported by that endpoint and in the log without stopping the inge
 Note that the connector's own settings still have to reach the service. A plugin declares the property
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.
 
+Two connectors come with the project. `../content-lake-app/connectors/cmis-connector` is a real source for
+any CMIS 1.1 repository, and `connector-batch-ingester` already declares its `CMIS_*` settings, so it needs
+only the jar and the values. `../content-lake-app/connector-archetype/examples/sample-directory-connector` is
+a hundred-line worked example to read before writing one.
+
 ## Documentation
 
 | Doc | Contents |
@@ -587,6 +592,28 @@ CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
 ```
 
 It removes the service and the jar on exit; pass `KEEP_RUNNING=true` to keep both for poking at.
+
+## CMIS Suite
+
+`test/test-cmis.sh` is the same shape for the shipped CMIS connector
+(`../content-lake-app/connectors/cmis-connector`), and it checks the one thing a generic adapter has to be
+held to: that it ingests what the purpose-built adapter ingests. It creates a folder of fixtures in the
+running Alfresco, syncs it with the native adapter, then syncs the same folder over Alfresco's own CMIS
+endpoint and compares the two document sets. It also restricts one fixture to `admin` with inheritance off
+and asserts that a second user cannot retrieve it while the folder's public fixture stays readable, which is
+the ACL mapping working rather than being skipped.
+
+Unlike `test-connector.sh` it pins no `RAG_PERMISSION_SOURCE_IDS`: since #133 the permission filter
+discovers every source in the index, so a pin would mask exactly what needs proving.
+
+```bash
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  RAG_AUTH=admin:admin ./test/test-cmis.sh
+```
+
+One case it deliberately does not cover, and says so in its own output: a repository reporting
+`capabilityACL=NONE`. Alfresco reports `manage`, so the fail-closed refusal and the `sync-account` and
+`public` fallbacks are unit-tested in the connector instead.
 
 ## Deploying to AWS EC2
 
