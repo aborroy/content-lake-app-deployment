@@ -275,11 +275,16 @@ rag_hybrid_basic() {
     -d "{\"query\":$(json_escape "$query"),\"topK\":20}" 2>/dev/null || echo '{}'
 }
 
+# /api/rag/prompt takes "question"; the search endpoints take "query". Sending "query" here binds
+# nothing, so the endpoint answers 400 "Question is required" and D6 fails with an empty answer -- which
+# it did for months, and which was read as a symptom of the crowding in #100/#134 rather than as this.
+# test-rag-advisor.sh has always had it right and its /prompt assertions have always passed, which is the
+# comparison that gives it away.
 rag_prompt_basic() {
-  local auth="$1" query="$2"
+  local auth="$1" question="$2"
   curl -sf -u "$auth" -X POST "$RAG_URL/prompt" \
     -H 'Content-Type: application/json' \
-    -d "{\"query\":$(json_escape "$query"),\"topK\":5}" 2>/dev/null || echo '{}'
+    -d "{\"question\":$(json_escape "$question"),\"topK\":5}" 2>/dev/null || echo '{}'
 }
 
 assert_found() {
