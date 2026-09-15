@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-connector.sh - end-to-end proof that a connector jar can ingest (#132).
 #
-# Builds the sample connector from ../content-lake-app/connector-archetype/examples, drops the jar into
+# Builds the sample connector from ../content-lake-app/plugins/examples, drops the jar into
 # ./connectors, starts connector-batch-ingester on top of an already-running base stack, triggers a sync
 # and asserts the fixture documents are retrievable through the RAG service.
 #
@@ -59,7 +59,7 @@ RAG_URL="${BASE}/api/rag"
 
 # Held under its own name because .env is sourced later and would overwrite CONTENT_LAKE_GIT_CONTEXT.
 LOCAL_APP_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-$APP_SOURCE}"
-EXAMPLE_DIR="${APP_SOURCE}/connector-archetype/examples/sample-directory-connector"
+EXAMPLE_DIR="${APP_SOURCE}/plugins/examples/sample-directory-connector"
 JAR_NAME="sample-directory-connector-1.0.0.jar"
 SOURCE_TYPE="sample-directory"
 FIXTURE_DIR="$(mktemp -d)"
@@ -149,7 +149,7 @@ if [ "$BUILD_JAR" = "true" ] || [ ! -f "$BUILT_JAR" ]; then
     -v "connector-test-m2:/root/.m2" \
     -w /src maven:3.9.11-eclipse-temurin-25-alpine \
     sh -c "mvn -q -B -pl common/content-lake-spi -am install -DskipTests \
-        && mvn -q -B -f connector-archetype/examples/sample-directory-connector/pom.xml package" \
+        && mvn -q -B -f plugins/examples/sample-directory-connector/pom.xml package" \
     || { fail "T1: the sample connector failed to build"; exit 1; }
 fi
 

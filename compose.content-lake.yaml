@@ -17,7 +17,8 @@ services:
     image: content-lake-app/batch-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/batch-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: batch-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
@@ -82,7 +83,8 @@ services:
     image: content-lake-app/live-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/live-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: live-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
@@ -137,7 +139,8 @@ services:
     restart: unless-stopped
     build:
       context: .
-      dockerfile: dockerfiles/rag-service/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: rag-service
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
@@ -337,7 +340,8 @@ services:
     image: content-lake-app/nuxeo-batch-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/nuxeo-batch-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: nuxeo-batch-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
@@ -400,7 +404,8 @@ services:
     image: content-lake-app/connector-batch-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/connector-batch-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: connector-batch-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     ports:
@@ -420,11 +425,11 @@ services:
       # warn starts even when a connector's configuration does not satisfy its schema, reporting it on
       # GET /api/connectors instead. fail (the default) refuses to start.
       CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION:-fail}
-      # Settings for the example connector in ../content-lake-app/connector-archetype/examples. Harmless
+      # Settings for the example connector in ../content-lake-app/plugins/examples. Harmless
       # when a different connector is mounted: an unrecognised variable is simply never read.
       SAMPLE_DIRECTORY_ROOT_PATH: ${SAMPLE_DIRECTORY_ROOT_PATH:-/data/connector}
       SAMPLE_DIRECTORY_SOURCE_ID: ${SAMPLE_DIRECTORY_SOURCE_ID:-sample-directory}
-      # Settings for the CMIS connector in ../content-lake-app/connectors/cmis-connector (#125), which
+      # Settings for the CMIS connector in ../content-lake-app/plugins/cmis-connector (#125), which
       # ingests any CMIS 1.1 repository. Empty unless a deployment sets them, and the schema is what
       # refuses startup when a required one is missing, naming the setting rather than failing later.
       # Batch only: CMIS has no change feed, so there is no live counterpart to this service.
@@ -496,7 +501,8 @@ services:
     image: content-lake-app/filesystem-batch-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/filesystem-batch-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: filesystem-batch-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
@@ -554,7 +560,8 @@ services:
     image: content-lake-app/nuxeo-live-ingester:local
     build:
       context: .
-      dockerfile: dockerfiles/nuxeo-live-ingester/Dockerfile
+      dockerfile: dockerfiles/Dockerfile
+      target: nuxeo-live-ingester
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:

@@ -28,7 +28,7 @@
 #   - the alfresco (or full/demo) base stack already up and healthy
 #   - the AI backend on :12434, since ingestion embeds
 #   - Docker, curl, jq, unzip
-#   - a built jar under ../content-lake-app/connectors/cmis-connector/target/, or BUILD_JAR=true
+#   - a built jar under ../content-lake-app/plugins/cmis-connector/target/, or BUILD_JAR=true
 #
 # Usage:
 #   CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
@@ -74,7 +74,7 @@ INGESTER="http://${HOST}:9096"
 CMIS_ENDPOINT="http://alfresco:8080/alfresco/api/-default-/public/cmis/versions/1.1/browser"
 
 LOCAL_APP_CONTEXT="${CONTENT_LAKE_GIT_CONTEXT:-$APP_SOURCE}"
-CONNECTOR_DIR="${APP_SOURCE}/connectors/cmis-connector"
+CONNECTOR_DIR="${APP_SOURCE}/plugins/cmis-connector"
 JAR_NAME="cmis-connector-1.0.0.jar"
 BUILT_JAR="${CONNECTOR_DIR}/target/${JAR_NAME}"
 SOURCE_TYPE="cmis"
@@ -219,7 +219,7 @@ if [ "$BUILD_JAR" = "true" ] || [ ! -f "$BUILT_JAR" ]; then
   docker run --rm -v "$(cd "$APP_SOURCE" && pwd):/src" -v "connector-test-m2:/root/.m2" \
     -w /src maven:3.9.11-eclipse-temurin-25-alpine \
     sh -c "mvn -q -B -pl common/content-lake-spi -am install -DskipTests \
-        && mvn -q -B -f connectors/cmis-connector/pom.xml package" \
+        && mvn -q -B -f plugins/cmis-connector/pom.xml package" \
     || { fail "C5: the CMIS connector failed to build"; exit 1; }
 fi
 

@@ -117,9 +117,8 @@ designed to be run in isolation.
 
 Every ingester mounts [`connectors/`](connectors/) read-only at `/opt/content-lake/connectors` and scans it
 at startup, so a source connector can be shipped as a jar instead of as a module of `content-lake-app`.
-That removes the whole ceremony an in-tree source needs -- a Maven module, a line in an intermediate POM,
-and a COPY line in each of the six service Dockerfiles, any one of which breaks that service's build when
-forgotten.
+That removes the whole ceremony an in-tree source needs: a Maven module, a line in an intermediate POM,
+and a COPY line in the service build, which breaks a service's build when forgotten.
 
 ```bash
 cp my-cmis-connector-1.0.0.jar connectors/
@@ -134,9 +133,9 @@ publishes, is reported by that endpoint and in the log without stopping the inge
 Note that the connector's own settings still have to reach the service. A plugin declares the property
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.
 
-Two connectors come with the project. `../content-lake-app/connectors/cmis-connector` is a real source for
+Two connectors come with the project. `../content-lake-app/plugins/cmis-connector` is a real source for
 any CMIS 1.1 repository, and `connector-batch-ingester` already declares its `CMIS_*` settings, so it needs
-only the jar and the values. `../content-lake-app/connector-archetype/examples/sample-directory-connector` is
+only the jar and the values. `../content-lake-app/plugins/examples/sample-directory-connector` is
 a hundred-line worked example to read before writing one.
 
 ## Documentation
@@ -579,7 +578,7 @@ run. If the script is interrupted or exits with failures, the log file is kept f
 ## Connector Suite
 
 `test/test-connector.sh` proves the plugin path end to end: it builds the sample connector from
-`../content-lake-app/connector-archetype/examples/sample-directory-connector` inside a Maven container,
+`../content-lake-app/plugins/examples/sample-directory-connector` inside a Maven container,
 drops the jar into `connectors/`, starts `connector-batch-ingester` on top of a base stack that is already
 running, triggers a sync and asserts the fixture documents come back out of semantic search.
 
@@ -596,7 +595,7 @@ It removes the service and the jar on exit; pass `KEEP_RUNNING=true` to keep bot
 ## CMIS Suite
 
 `test/test-cmis.sh` is the same shape for the shipped CMIS connector
-(`../content-lake-app/connectors/cmis-connector`), and it checks the one thing a generic adapter has to be
+(`../content-lake-app/plugins/cmis-connector`), and it checks the one thing a generic adapter has to be
 held to: that it ingests what the purpose-built adapter ingests. It creates a folder of fixtures in the
 running Alfresco, syncs it with the native adapter, then syncs the same folder over Alfresco's own CMIS
 endpoint and compares the two document sets. It also restricts one fixture to `admin` with inheritance off

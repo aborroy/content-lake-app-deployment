@@ -18,7 +18,7 @@
 #      environment variables using the names its schema declares -- hyphens become underscores, so
 #      `sample-directory.root-path` is SAMPLE_DIRECTORY_ROOT_PATH -- then POST /api/sync/configured.
 #      GET /api/connectors lists what loaded and anything that failed to;
-#      ../content-lake-app/connector-archetype/examples has a working connector to build)
+#      ../content-lake-app/plugins/examples has a working connector to build)
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)

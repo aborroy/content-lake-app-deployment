@@ -38,7 +38,7 @@ to ingest with.
 Where the walk starts: a connector that implements `ContentSourceClient.getRootNodeId()` says so itself and
 needs nothing configured. Otherwise set `CONNECTOR_ROOTS` to one or more node ids, comma separated.
 
-`../content-lake-app/connector-archetype/examples/sample-directory-connector` is a working connector to try
+`../content-lake-app/plugins/examples/sample-directory-connector` is a working connector to try
 this with, and `test/test-connector.sh` builds it, mounts it and asserts the documents come back out of
 semantic search.
 

@@ -1,4 +1,17 @@
 # syntax=docker/dockerfile:1.7
+#
+# The eighth build that depends on content-lake-app's module layout, and the one that is easy to miss:
+# the other seven are the service images in dockerfiles/Dockerfile. This one is not a Content Lake
+# service at all, it is the Alfresco repository with the Content Lake content model installed into it.
+#
+# It names common/content-lake-repo-model twice, below. If that module moves, both lines change.
+# Unlike the service images it copies the whole source context rather than enumerating POMs, so adding
+# or renaming any OTHER module does not affect it.
+#
+# Its source context is named content_lake_app (CONTENT_LAKE_ACS_GIT_CONTEXT), not code.
+#
+# It stays on temurin-21 while the rest of the build uses 25 because content-lake-repo-model is pinned
+# to Java 17 for Alfresco SDK compatibility, and the root POM it inherits compiles nothing itself.
 
 # Global ARGs must be declared before any FROM so they can be used in FROM instructions.
 ARG ALFRESCO_TAG

@@ -20,11 +20,25 @@ This project is part of the **Content Lake** PoC ecosystem. Contributions are we
    ```
 5. Open a pull request. Describe what changed and why.
 
-## Inline Dockerfiles
+## Service Dockerfiles
 
-When adding a new Maven module to `content-lake-app`, also update
-`compose.content-lake.yaml`. Each service has an inline Dockerfile with two sections that
-enumerate modules explicitly -- see the README for details.
+All seven Content Lake service images are built from a single file, `dockerfiles/Dockerfile`. Each
+service is a build target, selected from `compose.content-lake.yaml` with `target:`.
+
+When adding a new Maven module to `content-lake-app`, add one `COPY --from=code <group>/<module>/pom.xml`
+line to the `poms` stage of that file. That stage is the only place the reactor's module list is
+enumerated, and Maven needs the full reactor to resolve any subset of it, so a missing line breaks
+services unrelated to the new module. Add a `src` copy only to the service stages that actually build
+the module.
+
+`compose.content-lake.yaml` holds no build instructions beyond `context`, `dockerfile`, `target` and the
+`code` context, so adding a module does not touch it. Only adding a new *service* would.
+
+One further build depends on the module layout and is easy to miss: `acs/alfresco/Dockerfile` installs
+`common/content-lake-repo-model` into the Alfresco image and names that path twice.
+
+Nothing under `content-lake-app/plugins/` takes part in any of this. A connector ships as a jar dropped
+into `connectors/` at runtime.
 
 ## Commit Messages
 
