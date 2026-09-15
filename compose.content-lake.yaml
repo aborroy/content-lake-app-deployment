@@ -282,8 +282,11 @@ services:
       # chunks, so a long document can fill it alone and crowd every other document out whatever their
       # own scores are. Over-fetching gives the cap something to promote. Off by default until the
       # document-diversity sweep confirms the gain.
-      RAG_DOCUMENT_DIVERSITY_ENABLED: ${RAG_DOCUMENT_DIVERSITY_ENABLED:-false}
-      RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT: ${RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT:-3}
+      # On by default (#134), and applied to the search endpoints only: the RAG prompt path opts out
+      # per request, because capping the generator's context cost faithfulness and citation accuracy on
+      # the golden set while raising document recall for a caller browsing results.
+      RAG_DOCUMENT_DIVERSITY_ENABLED: ${RAG_DOCUMENT_DIVERSITY_ENABLED:-true}
+      RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT: ${RAG_DOCUMENT_DIVERSITY_MAX_CHUNKS_PER_DOCUMENT:-2}
       RAG_DOCUMENT_DIVERSITY_OVER_FETCH_FACTOR: ${RAG_DOCUMENT_DIVERSITY_OVER_FETCH_FACTOR:-3}
       # Self-RAG gate. RAG_RETRIEVAL_GRADING_MIN_SCORE is on the fusion's own scale, not cosine's:
       # under the committed weighted/minmax strategy hit scores span 0-1, but under rrf they span
@@ -421,6 +424,26 @@ services:
       # when a different connector is mounted: an unrecognised variable is simply never read.
       SAMPLE_DIRECTORY_ROOT_PATH: ${SAMPLE_DIRECTORY_ROOT_PATH:-/data/connector}
       SAMPLE_DIRECTORY_SOURCE_ID: ${SAMPLE_DIRECTORY_SOURCE_ID:-sample-directory}
+      # Settings for the CMIS connector in ../content-lake-app/connectors/cmis-connector (#125), which
+      # ingests any CMIS 1.1 repository. Empty unless a deployment sets them, and the schema is what
+      # refuses startup when a required one is missing, naming the setting rather than failing later.
+      # Batch only: CMIS has no change feed, so there is no live counterpart to this service.
+      CMIS_URL: ${CMIS_URL:-}
+      CMIS_BINDING: ${CMIS_BINDING:-browser}
+      CMIS_REPOSITORY_ID: ${CMIS_REPOSITORY_ID:-}
+      CMIS_USERNAME: ${CMIS_USERNAME:-}
+      CMIS_PASSWORD: ${CMIS_PASSWORD:-}
+      CMIS_ROOT_PATH: ${CMIS_ROOT_PATH:-}
+      CMIS_SOURCE_ID: ${CMIS_SOURCE_ID:-}
+      CMIS_INCLUDE_PATHS: ${CMIS_INCLUDE_PATHS:-}
+      CMIS_EXCLUDE_PATHS: ${CMIS_EXCLUDE_PATHS:-}
+      CMIS_INCLUDE_MIME_TYPES: ${CMIS_INCLUDE_MIME_TYPES:-}
+      CMIS_EXCLUDE_MIME_TYPES: ${CMIS_EXCLUDE_MIME_TYPES:-}
+      CMIS_PAGE_SIZE: ${CMIS_PAGE_SIZE:-100}
+      # What to do when the repository cannot report ACLs: fail-closed (the default, ingest nothing),
+      # sync-account (readable by CMIS_USERNAME only) or public (readable by everyone). A repository
+      # whose permissions cannot be read must not silently produce world-readable documents.
+      CMIS_ACL_FALLBACK: ${CMIS_ACL_FALLBACK:-fail-closed}
       # No repository transform service backs a plugin connector, so extraction is in-process Tika
       # unless an engine is configured. A connector that converts its own content bypasses this.
       EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
