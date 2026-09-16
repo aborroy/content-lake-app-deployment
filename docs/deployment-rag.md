@@ -124,12 +124,18 @@ that window, which is what a connector jar dropped into a running deployment nee
 Two consequences worth knowing before deploying a source other than Alfresco or Nuxeo, which today
 means the filesystem connector or any plugin connector on `connector-batch-ingester`:
 
-- **Group memberships cannot be expanded for such a source.** rag-service has a group directory client
-  for Alfresco and for Nuxeo and no way to ask a third source. Its clause is therefore built from the
-  caller's own authorities: documents carrying `__Everyone__` and documents granted to the caller by
-  name are retrievable, and documents granted to a *group* are not. That is deliberate, because the
-  alternative is over-sharing, and it is logged once per source at WARN. A source whose ACLs are
-  group-based needs `RAG_PERMISSION_SOURCE_IDS` plus a group resolver, which is a code change.
+- **Group memberships can only be expanded for a source type that has a resolver.** rag-service holds
+  one group resolver per source type, selected by the `<sourceType>` half of `cin_sourceId`; it ships
+  `alfresco` and `nuxeo`. A source of any other type gets a clause built from the caller's own
+  authorities: documents carrying `__Everyone__` and documents granted to the caller by name are
+  retrievable, and documents granted to a *group* are not. That is deliberate, because the alternative
+  is over-sharing, and it is logged once per source at WARN. Making a group-based source retrievable is
+  a code change, but a bounded one: one new bean declaring its `sourceType()`, with nothing to alter in
+  the search paths.
+- **A principal with no object in the directory is not the same as an outage.** A resolver that reaches
+  its directory and finds no such identity leaves the caller their default authorities on that source,
+  which is what a site-local or repository-local principal needs; only a directory that could not be
+  asked at all follows `RAG_SECURITY_GROUP_RESOLUTION_FAILURE`.
 - **`RAG_PERMISSION_SOURCE_IDS` disables discovery entirely.** Pinning it was the only way to make a
   third source retrievable before this behaviour existed, and a pin that omits a source hides that
   source's documents. Leave it unset unless the set must not be inferred; when it is set, rag-service
@@ -302,6 +308,14 @@ variables, all **default off**, so the baseline pipeline is unchanged unless a f
   repository. `fail-closed` excludes that source from the permission filter, so a directory outage
   narrows results; `degrade` proceeds with the caller's own name plus `GROUP_EVERYONE`, losing only
   group-granted documents. Both log at WARN, and an unrecognised value is read as `fail-closed`.
+- Group membership caching: `RAG_SECURITY_GROUP_CACHE_TTL_SECONDS` (default 300) and
+  `RAG_SECURITY_GROUP_CACHE_MAX_SIZE` (default 10000) bound an in-memory cache of resolved group
+  memberships, keyed by source type and username, so a query does not pay a directory round trip per
+  source. The TTL is the ceiling on how stale a caller's membership may be, so a deployment that
+  revokes group access and expects it to take effect immediately should lower it; `0` disables the
+  cache and asks the directory on every query. A directory failure is never cached, so an outage is
+  retried rather than held for the TTL. Hit-rate is exposed as `cache.gets{cache=rag.security.groups}`
+  under `/actuator/metrics`.
 - Administrator bypass: `RAG_SECURITY_ADMIN_BYPASS_ENABLED` decides whether a member of
   `GROUP_ALFRESCO_ADMINISTRATORS` reads an Alfresco source with no `sys_racl` condition at all. The
   application default is `false`, so an administrator is filtered by document ACLs like anyone else.
