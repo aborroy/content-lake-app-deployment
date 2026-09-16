@@ -199,9 +199,49 @@ Content-Type: application/json
 
 {
   "query": "document retention policy",
-  "topK": 5
+  "maxResults": 5
 }
 ```
+
+### Choosing topK or topDocuments
+
+Both search endpoints accept two budgets, and which one to send depends on what the caller counts.
+
+`topK` (`maxResults` on hybrid search) is a budget of **chunks**. A document contributes every chunk it has
+to the ranking, so a single long document can fill the budget on its own: on the deployment corpus a `topK`
+of 10 has returned 10 chunks belonging to 2 documents. That is what you want for feeding a context window,
+where the unit of value is a passage.
+
+`topDocuments`, with the optional `chunksPerDocument`, is a budget of **documents**. Send it when the caller
+is a person or a UI browsing results, where "ten results" means ten files. When present it replaces `topK` /
+`maxResults` entirely rather than combining with them.
+
+```http
+POST /api/rag/search/semantic
+
+{
+  "query": "document retention policy",
+  "topDocuments": 10,
+  "chunksPerDocument": 2
+}
+```
+
+Three things worth knowing before turning it on:
+
+- The answer can be shorter than `topDocuments * chunksPerDocument`. A document outside the budget is never
+  admitted to fill the remainder, so a corpus with fewer matching documents than asked for returns fewer.
+  Read `documentCount` rather than counting `results`.
+- It costs retrieval depth. Satisfying a document budget means asking the index for more rows than the answer
+  carries, and the semantic endpoint may re-query at a doubled depth up to twice more when the candidate pool
+  turns out to be dominated by a few documents. Expect higher latency on a skewed corpus than the same
+  request expressed in chunks.
+- Both fields are per-request. The deployment-wide equivalent is
+  `rag.retrieval.document-diversity.max-chunks-per-document` (default 2), which bounds any one document's
+  share of a `topK` answer and is the fallback when `topDocuments` arrives without `chunksPerDocument`.
+
+Zero or negative values are rejected with 400. Values over the maximum (50 documents, 10 chunks per document)
+are clamped, and the response reports what was applied in `appliedTopDocuments` and
+`appliedChunksPerDocument`.
 
 ### RAG prompt
 
