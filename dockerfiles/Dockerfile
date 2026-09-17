@@ -251,6 +251,11 @@ RUN mkdir -p /layers \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
 FROM runtime-base AS connector-batch-ingester
+# Somewhere a plugin connector may persist state between runs, such as a change cursor or a delta token.
+# Created here and owned by app because Docker copies an image directory's ownership into a fresh named
+# volume mounted over it: without this the volume would be root-owned and the non-root process could not
+# write to it. Same reason and same shape as /data on nuxeo-live-ingester above.
+RUN mkdir -p /var/lib/content-lake/connector && chown app:app /var/lib/content-lake/connector
 COPY --from=build-connector-batch-ingester /layers/dependencies/ ./
 COPY --from=build-connector-batch-ingester /layers/snapshot-dependencies/ ./
 COPY --from=build-connector-batch-ingester /layers/spring-boot-loader/ ./

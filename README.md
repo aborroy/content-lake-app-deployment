@@ -133,6 +133,13 @@ start anyway (`CONNECTOR_VALIDATION` defaults to `warn` for them, since a connec
 use should not stop their own ingestion); `connector-batch-ingester` defaults to `fail`, because for it that
 jar is the only source. `CONNECTOR_VALIDATION_INGESTERS=fail` makes the other five strict as well.
 
+`connector-batch-ingester` also mounts one writable directory, published as `CONNECTOR_STATE_DIRECTORY`
+(`/var/lib/content-lake/connector`), for state a connector cannot recompute such as a change cursor or a
+delta token. It is a named volume, so `make clean` wipes it and `make down` does not, and a connector
+should treat a missing cursor as normal. Nothing reads the variable by itself: a connector declares its
+own setting and the operator points it at that path. See
+[`connectors/README.md`](connectors/README.md).
+
 Note that the connector's own settings still have to reach the service. A plugin declares the property
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.
 

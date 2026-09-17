@@ -11,6 +11,9 @@ volumes:
   mongodb-data:
   opensearch-data:
   nuxeo-live-audit-data:
+  # Writable state for a plugin connector on connector-batch-ingester (change cursors, delta tokens).
+  # Only attached by the opt-in `connector` profile, so it is unused by every base deployment.
+  connector-state-data:
 
 # ─── Build secrets ────────────────────────────────────────────────────────────
 secrets:

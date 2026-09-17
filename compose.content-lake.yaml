@@ -489,6 +489,14 @@ services:
       CONNECTOR_BATCH_RECONCILE_MAX_DELETES: ${CONNECTOR_BATCH_RECONCILE_MAX_DELETES:-1000}
       CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS: ${CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
       CONNECTOR_BATCH_RECONCILE_PAGE_SIZE: ${CONNECTOR_BATCH_RECONCILE_PAGE_SIZE:-200}
+      # Where a connector may persist state between runs, such as a change cursor or a delta token. The
+      # host only provides somewhere writable and names it; a connector that needs state declares its own
+      # setting in its ConnectorSchema and the operator points that setting at this path. Nothing reads
+      # this variable by itself.
+      #
+      # Only this service gets it. A mounted jar is loaded by all six ingesters, but this is the only one
+      # that ingests from the registry, so it is the only one with state to keep.
+      CONNECTOR_STATE_DIRECTORY: /var/lib/content-lake/connector
     volumes:
       # Content for a connector that reads a mounted path, such as the sample directory connector.
       # Override with CONNECTOR_HOST_PATH. A connector that talks to a remote repository ignores it.
@@ -496,6 +504,11 @@ services:
       # Connector plugins (#124): any jar dropped in here is discovered at startup. For this service the
       # directory is not optional, since the jar it finds here is its only source.
       - "${CONNECTOR_PLUGIN_PATH:-./connectors}:/opt/content-lake/connectors:ro"
+      # The only writable mount on this service. A named volume rather than a bind mount on purpose: it
+      # is wiped by `make clean` along with the index, which is what the standing "start every run from
+      # an empty index" rule wants. A bind mount would survive `make clean` and reintroduce exactly the
+      # stale-state problem that rule exists to prevent.
+      - connector-state-data:/var/lib/content-lake/connector
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

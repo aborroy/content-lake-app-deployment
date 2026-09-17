@@ -62,3 +62,37 @@ setting. Hyphens and dots both become underscores and the name is upper-cased, s
 
 An empty directory is the normal state: with nothing here, an ingester logs that the directory holds no
 jars and behaves exactly as it did before.
+
+## Keeping state between runs
+
+`connector-batch-ingester` mounts one writable directory and publishes its path as
+`CONNECTOR_STATE_DIRECTORY`, default `/var/lib/content-lake/connector`. Everything else that service
+mounts is read-only, including this directory of jars.
+
+It is for the state a connector cannot recompute: a change cursor, a delta token, a continuation marker.
+The sources with the cheapest and most complete change feeds are exactly the ones that hand you an opaque
+token and expect you to hold it, and discarding it on restart means re-enumerating the whole corpus.
+
+The host only provides the directory and names it. **Nothing reads `CONNECTOR_STATE_DIRECTORY` on its
+own:** a connector that needs state declares its own setting in its `ConnectorSchema`, reads it through
+`ConnectorContext`, and the operator points that setting at this path. So for a connector declaring
+`sharepoint.state-directory`:
+
+```bash
+SHAREPOINT_STATE_DIRECTORY=/var/lib/content-lake/connector \
+  docker compose --profile alfresco --profile connector up -d connector-batch-ingester
+```
+
+Two things to know.
+
+**Namespace your files.** Several jars can be mounted at once and they all see the same directory, so a
+connector that writes `cursor.json` will collide with the next one that does. Use something derived from
+the source type, `sharepoint-cursor.json` or a subdirectory of your own making.
+
+**It is a named volume, so `make clean` wipes it and `make down` does not.** That is deliberate: the
+project's standing rule is that every test run starts from an empty index, and state that outlived a
+`make clean` would reintroduce the staleness that rule exists to prevent. Treat a missing cursor as
+normal and fall back to a full enumeration; it is the state you will be in after every wipe.
+
+Only `connector-batch-ingester` gets the mount. A jar is loaded by all six ingesters, but this is the only
+one that ingests from the registry, so it is the only one with state to keep.
