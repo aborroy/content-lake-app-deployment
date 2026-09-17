@@ -416,6 +416,14 @@ info "(CmisAclMapperTest), and the connector logs which one is in force at start
 
 # ── Idempotency ────────────────────────────────────────────────────────────────
 section "Re-sync"
+metric() {
+  curl -sf -u "$SYNC_AUTH" "${INGESTER}/actuator/metrics/$1" 2>/dev/null \
+    | jq -r '.measurements[0].value // 0' 2>/dev/null || echo 0
+}
+# Baselined rather than compared against a fixture count: these counters are process-wide and this
+# service is shared with test-connector.sh, so a run that follows it starts from a non-zero count.
+reprocesses_before=$(metric contentlake.ingest.content.reprocesses)
+shortcircuits_before=$(metric contentlake.ingest.content.shortcircuits)
 # #120: unchanged content is not re-chunked or re-embedded. This also proves the connector returns a
 # stable modifiedAt, without which every pass would re-extract and re-embed the whole corpus.
 job2=$(curl -sf -u "$SYNC_AUTH" -X POST "${INGESTER}/api/sync/configured" 2>/dev/null || echo '{}')
@@ -433,16 +441,22 @@ else
   fail "C19: second sync status=${status}: $(echo "$final2" | jq -c .)"
 fi
 
-metric() {
-  curl -sf -u "$SYNC_AUTH" "${INGESTER}/actuator/metrics/$1" 2>/dev/null \
-    | jq -r '.measurements[0].value // 0' 2>/dev/null || echo 0
-}
+# What is asserted is that the second pass did not re-embed. Two mechanisms reach that and which one
+# fires is a property of the source, not of this host: since #147 a connector's modifiedAt is stored, so
+# a source whose timestamp round-trips exactly is caught by the metadata staleness check and never
+# reaches extraction, while one whose timestamp is absent or coarser reaches extraction and is caught by
+# the content fingerprint. CMIS reports millisecond precision and takes the first path. Asserting the
+# short circuit specifically failed this suite for taking the cheaper route.
 short_circuits=$(metric contentlake.ingest.content.shortcircuits)
 reprocesses=$(metric contentlake.ingest.content.reprocesses)
-if [ "${short_circuits%.*}" -ge "$FIXTURE_COUNT" ]; then
-  pass "C20: the second pass reused stored content for all ${FIXTURE_COUNT} documents (shortcircuits=${short_circuits}, reprocesses=${reprocesses})"
+reprocessed=$(( ${reprocesses%.*} - ${reprocesses_before%.*} ))
+short_circuited=$(( ${short_circuits%.*} - ${shortcircuits_before%.*} ))
+if [ "$reprocessed" -gt 0 ]; then
+  fail "C20: the second pass re-embedded ${reprocessed} document(s) (shortcircuits +${short_circuited}, reprocesses +${reprocessed})"
+elif [ "$short_circuited" -ge "$FIXTURE_COUNT" ]; then
+  pass "C20: the second pass reused stored content for all ${FIXTURE_COUNT} documents (shortcircuits +${short_circuited})"
 else
-  fail "C20: content reuse did not short-circuit the second pass (shortcircuits=${short_circuits}, reprocesses=${reprocesses})"
+  pass "C20: the second pass re-embedded nothing, skipped on metadata before extraction (shortcircuits +${short_circuited}, reprocesses +${reprocessed})"
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────────
