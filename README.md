@@ -128,7 +128,10 @@ curl http://localhost:9090/api/connectors -u admin:admin   # what loaded, from w
 
 The directory is empty by default and an empty directory changes nothing. Override the mount with
 `CONNECTOR_PLUGIN_PATH`. A jar that cannot be read, or whose configuration does not satisfy the schema it
-publishes, is reported by that endpoint and in the log without stopping the ingester.
+publishes, is reported by that endpoint and in the log. The five ingesters that never ingest from a jar
+start anyway (`CONNECTOR_VALIDATION` defaults to `warn` for them, since a connector they were not going to
+use should not stop their own ingestion); `connector-batch-ingester` defaults to `fail`, because for it that
+jar is the only source. `CONNECTOR_VALIDATION_INGESTERS=fail` makes the other five strict as well.
 
 Note that the connector's own settings still have to reach the service. A plugin declares the property
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.

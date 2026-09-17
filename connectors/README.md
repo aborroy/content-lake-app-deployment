@@ -12,13 +12,19 @@ curl http://localhost:9090/api/connectors -u admin:admin
 
 The listing reports every connector the ingester has, where each came from, and anything that failed to
 load. A jar that cannot be read, or whose configuration does not satisfy the schema it publishes, is
-reported there and in the container log; it does not stop the ingester.
+reported there and in the container log.
+
+Whether that also stops the ingester depends on which one it is. The five that never ingest from a jar
+default `CONNECTOR_VALIDATION` to `warn`, so an unconfigured connector is reported and they start anyway:
+they were not going to use it, and stopping an unrelated ingestion over it would be a failure the operator
+cannot act on. `connector-batch-ingester` defaults to `fail`, since a connector it cannot load leaves it
+with no source at all. Set `CONNECTOR_VALIDATION_INGESTERS=fail` to make the other five strict too.
 
 ## Ingesting with it
 
 Every ingester *loads* a connector; only one *ingests* with it. The Alfresco, Nuxeo and filesystem
-ingesters each drive a client they were compiled against, so for them a mounted jar is inert and the
-listing above is all it does. `connector-batch-ingester`, on the `connector` profile, takes its client,
+ingesters each drive a client they were compiled against, so for them the listing above is all a mounted
+jar does. `connector-batch-ingester`, on the `connector` profile, takes its client,
 scope rules and optionally its extractor from the jar:
 
 ```bash

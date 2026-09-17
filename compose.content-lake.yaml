@@ -62,6 +62,10 @@ services:
       INGESTION_RECONCILE_MAX_DELETES: ${INGESTION_RECONCILE_MAX_DELETES:-1000}
       INGESTION_RECONCILE_MAX_SEEN_IDS: ${INGESTION_RECONCILE_MAX_SEEN_IDS:-200000}
       INGESTION_RECONCILE_PAGE_SIZE: ${INGESTION_RECONCILE_PAGE_SIZE:-200}
+      # This service ingests through the client it was compiled against, never from a mounted jar,
+      # so a connector whose settings are supplied to connector-batch-ingester alone is listed with
+      # its problem on GET /api/connectors rather than being fatal here. Set fail to refuse to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION_INGESTERS:-warn}
     volumes:
       # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
       # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
@@ -116,6 +120,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+      # This service ingests through the client it was compiled against, never from a mounted jar,
+      # so a connector whose settings are supplied to connector-batch-ingester alone is listed with
+      # its problem on GET /api/connectors rather than being fatal here. Set fail to refuse to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION_INGESTERS:-warn}
     volumes:
       # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
       # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
@@ -376,6 +384,10 @@ services:
       NUXEO_BATCH_RECONCILE_MAX_DELETES: ${NUXEO_BATCH_RECONCILE_MAX_DELETES:-1000}
       NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS: ${NUXEO_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
       NUXEO_BATCH_RECONCILE_PAGE_SIZE: ${NUXEO_BATCH_RECONCILE_PAGE_SIZE:-200}
+      # This service ingests through the client it was compiled against, never from a mounted jar,
+      # so a connector whose settings are supplied to connector-batch-ingester alone is listed with
+      # its problem on GET /api/connectors rather than being fatal here. Set fail to refuse to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION_INGESTERS:-warn}
     volumes:
       # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
       # this changes nothing until a connector is placed in it. Read-only: an ingester has no business
@@ -540,6 +552,10 @@ services:
       FILESYSTEM_BATCH_RECONCILE_MAX_DELETES: ${FILESYSTEM_BATCH_RECONCILE_MAX_DELETES:-1000}
       FILESYSTEM_BATCH_RECONCILE_MAX_SEEN_IDS: ${FILESYSTEM_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
       FILESYSTEM_BATCH_RECONCILE_PAGE_SIZE: ${FILESYSTEM_BATCH_RECONCILE_PAGE_SIZE:-200}
+      # This service ingests through the client it was compiled against, never from a mounted jar,
+      # so a connector whose settings are supplied to connector-batch-ingester alone is listed with
+      # its problem on GET /api/connectors rather than being fatal here. Set fail to refuse to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION_INGESTERS:-warn}
     volumes:
       # Mount the host directory to ingest (read-only). Override with FILESYSTEM_HOST_PATH.
       - "${FILESYSTEM_HOST_PATH:-./filesystem-data}:/data/filesystem:ro"
@@ -590,6 +606,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-ai/gpt-oss}
       SPRING_HTTP_CLIENT_READ_TIMEOUT: ${SPRING_HTTP_CLIENT_READ_TIMEOUT:-180s}
       SPRING_HTTP_CLIENT_CONNECT_TIMEOUT: ${SPRING_HTTP_CLIENT_CONNECT_TIMEOUT:-10s}
+      # This service ingests through the client it was compiled against, never from a mounted jar,
+      # so a connector whose settings are supplied to connector-batch-ingester alone is listed with
+      # its problem on GET /api/connectors rather than being fatal here. Set fail to refuse to start.
+      CONNECTOR_VALIDATION: ${CONNECTOR_VALIDATION_INGESTERS:-warn}
     volumes:
       - nuxeo-live-audit-data:/data
       # Connector plugins (#124): any jar dropped in here is discovered at startup. Empty by default, so
