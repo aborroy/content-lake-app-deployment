@@ -55,30 +55,10 @@ dc(){
        docker compose --env-file .env.local "$@" )
 }
 
-# wait_http_code <url> <expected_code> [auth] [max_tries] [interval_s]
-wait_http_code(){
-  local url="$1" want="$2" auth="${3:-}" max="${4:-60}" interval="${5:-10}"
-  local curl_auth=(); [ -n "$auth" ] && curl_auth=(-u "$auth")
-  local i code
-  for i in $(seq 1 "$max"); do
-    code=$(curl -s $CURL_TLS -o /dev/null -w '%{http_code}' "${curl_auth[@]}" "$url" 2>/dev/null || echo 000)
-    [ "$code" = "$want" ] && return 0
-    printf '.'; sleep "$interval"
-  done
-  echo; return 1
-}
-
-# wait_json_field <url> <jq_filter> <expected> [max_tries] [interval_s]
-wait_json_field(){
-  local url="$1" filter="$2" want="$3" max="${4:-60}" interval="${5:-10}"
-  local i val
-  for i in $(seq 1 "$max"); do
-    val=$(curl -s $CURL_TLS "$url" 2>/dev/null | jq -r "$filter" 2>/dev/null || echo "")
-    [ "$val" = "$want" ] && return 0
-    printf '.'; sleep "$interval"
-  done
-  echo; return 1
-}
+# The readiness probes live in test/lib/readiness.sh so this script and run-tests.sh cannot disagree
+# about what "ready" means. They did, which is what #20 was.
+# shellcheck source=lib/readiness.sh
+. "$SCRIPT_DIR/lib/readiness.sh"
 
 stack_down(){ dc --profile '*' down; }
 
@@ -128,13 +108,10 @@ wait_http_code "$BASE/api/sync/status" 200 'admin:admin' 60 5 \
 ok "batch-ingester status probe done"
 
 info "Waiting for RAG health status = UP (up to 5 min) …"
-if wait_json_field "$BASE/api/rag/health" '.status' 'UP' 60 5; then
+if wait_rag_up "$BASE" 'admin:admin' 60 5; then
   ok "RAG service health = UP"
 else
-  warn "RAG health never reached UP; current payload:"
-  curl -s $CURL_TLS "$BASE/api/rag/health" 2>/dev/null | jq . 2>/dev/null || true
-  warn "rag-service recent logs:"
-  docker logs --tail 120 content-lake-app-rag-service-1 2>&1 | tail -120 || true
+  warn "RAG health never reached UP"
 fi
 
 banner "Running Alfresco test suite"

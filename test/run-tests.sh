@@ -83,6 +83,13 @@ else
 fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+# The shared readiness probes, so this script and run-phase1.sh cannot disagree about what "ready"
+# means. wait_for_url below stays for endpoints whose status code really is the whole signal (a
+# repository API, a sync API behind nginx); anything that reports its own health in the body must use
+# wait_json_field, because a 200 from such an endpoint says nothing. See #20.
+# shellcheck source=lib/readiness.sh
+. "$SCRIPT_DIR/lib/readiness.sh"
+
 wait_for_url() {
   # wait_for_url <url> [auth] [max_tries=60] [interval_s=10]
   local url="$1" auth="${2:-}" max="${3:-60}" interval="${4:-10}"
@@ -170,10 +177,13 @@ wait_for_url \
   || die "Alfresco did not become ready within 10 minutes"
 ok "Alfresco is up"
 
-info "Waiting for RAG service (up to 3 min) …"
-wait_for_url "$BASE/api/rag/health" '' 36 5 \
-  || warn "RAG service health endpoint not returning 200; proceeding anyway"
-ok "RAG service is up"
+# The reported status, not the status code: /api/rag/health answers 200 {"status":"DOWN"} while its
+# dependencies are still starting, so a 200 check returns at once and the suite runs against a service
+# that is not serving. That is what made the B series fail for no code reason (#20).
+info "Waiting for RAG health status = UP (up to 5 min) …"
+wait_rag_up "$BASE" 'admin:admin' 60 5 \
+  || warn "RAG health never reached UP; proceeding anyway"
+ok "RAG service is UP"
 assert_local_build
 
 # The smoke suite probes /api/sync/status immediately; wait for the batch ingester so the first
@@ -206,10 +216,10 @@ wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
   || die "Nuxeo did not become ready within 8 minutes"
 ok "Nuxeo is up"
 
-info "Waiting for HXPR / RAG service …"
-wait_for_url "$BASE/api/rag/health" '' 36 5 \
-  || warn "RAG service health endpoint not returning 200; proceeding anyway"
-ok "RAG service is up"
+info "Waiting for HXPR / RAG health status = UP (up to 5 min) …"
+wait_rag_up "$BASE" 'admin:admin' 60 5 \
+  || warn "RAG health never reached UP; proceeding anyway"
+ok "RAG service is UP"
 assert_local_build
 
 # Route the readiness probe to the Nuxeo ingester (?sourceType=nuxeo); the default sync backend is
@@ -245,10 +255,10 @@ wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
   || die "Nuxeo did not become ready for full mode within 8 minutes"
 ok "Nuxeo is up"
 
-info "Waiting for RAG service …"
-wait_for_url "$BASE/api/rag/health" '' 36 5 \
-  || warn "RAG service health endpoint not returning 200 in full mode; proceeding anyway"
-ok "RAG service is up"
+info "Waiting for RAG health status = UP in full mode (up to 5 min) …"
+wait_rag_up "$BASE" 'admin:admin' 60 5 \
+  || warn "RAG health never reached UP in full mode; proceeding anyway"
+ok "RAG service is UP"
 assert_local_build
 
 info "Waiting for the batch ingesters (up to 3 min) …"

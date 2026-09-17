@@ -109,9 +109,20 @@ upload_file() {
 }
 
 # wait_for_solr_indexed <folder_node_id> <expected_count>
-# Batch discovery runs through AFTS/Solr, which indexes newly uploaded nodes a few seconds
-# after upload returns 201. Syncing before Solr catches up discovers 0 nodes and completes
-# empty. Poll an AFTS PARENT query until the expected child count is visible (up to ~3 min).
+# Batch discovery runs through the search index, which picks up newly uploaded nodes some seconds after
+# upload returns 201. Syncing before it catches up discovers 0 nodes and completes empty.
+#
+# Polls the query shape the ingester itself uses: ANCESTOR, not PARENT. That distinction is the whole
+# point of this helper. AlfrescoSearchService.buildDescendantFilesQuery issues
+# `ANCESTOR:"workspace://SpacesStore/<id>" AND TYPE:"cm:content"`, and the two shapes become visible at
+# different times on the OpenSearch-backed index: a PARENT query answering correctly does not mean the
+# ANCESTOR query does. Gating on PARENT let the suite proceed while the ingester still found nothing,
+# which showed up as `Descendant discovery ... found 0 file(s) (attempt 9/10)`, then
+# `metadataIngestedCount=0`, then B5-B9 failing on documents that were never ingested -- reading as a
+# pipeline regression rather than as this race. See aborroy/content-lake-app-deployment#20.
+#
+# ANCESTOR is also the more useful count: it includes nested descendants, which is what the ingester
+# will actually sync. For a flat fixture folder the two counts are identical.
 wait_for_solr_indexed() {
   local folder_id="$1" expected="$2" tid="${3:-B3a}" elapsed=0 found
   local search_url="${BASE}/alfresco/api/-default-/public/search/versions/1/search"
@@ -119,7 +130,7 @@ wait_for_solr_indexed() {
     found=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST \
       "$search_url" \
       -H 'Content-Type: application/json' \
-      -d "{\"query\":{\"language\":\"afts\",\"query\":\"PARENT:'workspace://SpacesStore/$folder_id' AND TYPE:'cm:content'\"},\"paging\":{\"maxItems\":100}}" \
+      -d "{\"query\":{\"language\":\"afts\",\"query\":\"ANCESTOR:'workspace://SpacesStore/$folder_id' AND TYPE:'cm:content'\"},\"paging\":{\"maxItems\":100}}" \
       2>/dev/null | jq -r '.list.pagination.totalItems // 0' 2>/dev/null || echo 0)
     if [ "${found:-0}" -ge "$expected" ]; then
       pass "$tid: Solr indexed $found/$expected uploaded files (ready to sync)"
