@@ -11,7 +11,10 @@
 #       code: "${CONTENT_LAKE_GIT_CONTEXT:-...}"
 #
 # Targets: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester,
-#          filesystem-batch-ingester, connector-batch-ingester
+#          plugin-batch-ingester, mock-graph
+#
+# The filesystem source is no longer among them: it ships as a connector jar (content-lake-app#148), which
+# is what removed a stage pair and three poms lines from this file rather than adding to them.
 #
 # App source arrives through the named build context "code" (CONTENT_LAKE_GIT_CONTEXT), which is either
 # a git URL or a local path such as ../content-lake-app.
@@ -37,8 +40,7 @@ COPY --from=code pom.xml .
 COPY --from=code common/pom.xml common/pom.xml
 COPY --from=code alfresco/pom.xml alfresco/pom.xml
 COPY --from=code nuxeo/pom.xml nuxeo/pom.xml
-COPY --from=code filesystem/pom.xml filesystem/pom.xml
-COPY --from=code connector/pom.xml connector/pom.xml
+COPY --from=code plugin-host/pom.xml plugin-host/pom.xml
 
 # Leaf modules. All of them, for every image: Maven needs the full reactor to resolve any subset.
 COPY --from=code common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
@@ -51,9 +53,7 @@ COPY --from=code alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-
 COPY --from=code nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
 COPY --from=code nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
 COPY --from=code nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-COPY --from=code filesystem/content-lake-source-filesystem/pom.xml filesystem/content-lake-source-filesystem/pom.xml
-COPY --from=code filesystem/filesystem-batch-ingester/pom.xml filesystem/filesystem-batch-ingester/pom.xml
-COPY --from=code connector/connector-batch-ingester/pom.xml connector/connector-batch-ingester/pom.xml
+COPY --from=code plugin-host/plugin-batch-ingester/pom.xml plugin-host/plugin-batch-ingester/pom.xml
 
 # Nothing under plugins/ belongs here. Those projects are outside the reactor on purpose: a connector
 # ships as a jar dropped into ./connectors at runtime, not as a module of this build.
@@ -206,60 +206,33 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 
 
 ############################################################
-# filesystem-batch-ingester (9095)
-############################################################
-FROM poms AS build-filesystem-batch-ingester
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl filesystem/filesystem-batch-ingester -am dependency:go-offline
-COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
-COPY --from=code common/content-lake-core/src common/content-lake-core/src
-COPY --from=code filesystem/content-lake-source-filesystem/src filesystem/content-lake-source-filesystem/src
-COPY --from=code filesystem/filesystem-batch-ingester/src filesystem/filesystem-batch-ingester/src
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl filesystem/filesystem-batch-ingester -am package
-RUN mkdir -p /layers \
- && JAR="$(ls -1 filesystem/filesystem-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
- && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
-
-FROM runtime-base AS filesystem-batch-ingester
-COPY --from=build-filesystem-batch-ingester /layers/dependencies/ ./
-COPY --from=build-filesystem-batch-ingester /layers/snapshot-dependencies/ ./
-COPY --from=build-filesystem-batch-ingester /layers/spring-boot-loader/ ./
-COPY --from=build-filesystem-batch-ingester /layers/application/ ./
-USER app
-EXPOSE 9095
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO- http://localhost:9095/actuator/health || exit 1
-
-
-############################################################
-# connector-batch-ingester (9096)
+# plugin-batch-ingester (9096)
 #
 # Builds no source adapter: its connector arrives at runtime as a jar in /opt/content-lake/connectors,
 # so only spi, core and the ingester itself are copied.
 ############################################################
-FROM poms AS build-connector-batch-ingester
+FROM poms AS build-plugin-batch-ingester
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl connector/connector-batch-ingester -am dependency:go-offline
+    mvn -q -DskipTests -pl plugin-host/plugin-batch-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
 COPY --from=code common/content-lake-core/src common/content-lake-core/src
-COPY --from=code connector/connector-batch-ingester/src connector/connector-batch-ingester/src
+COPY --from=code plugin-host/plugin-batch-ingester/src plugin-host/plugin-batch-ingester/src
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl connector/connector-batch-ingester -am package
+    mvn -q -DskipTests -pl plugin-host/plugin-batch-ingester -am package
 RUN mkdir -p /layers \
- && JAR="$(ls -1 connector/connector-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+ && JAR="$(ls -1 plugin-host/plugin-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
-FROM runtime-base AS connector-batch-ingester
+FROM runtime-base AS plugin-batch-ingester
 # Somewhere a plugin connector may persist state between runs, such as a change cursor or a delta token.
 # Created here and owned by app because Docker copies an image directory's ownership into a fresh named
 # volume mounted over it: without this the volume would be root-owned and the non-root process could not
 # write to it. Same reason and same shape as /data on nuxeo-live-ingester above.
 RUN mkdir -p /var/lib/content-lake/connector && chown app:app /var/lib/content-lake/connector
-COPY --from=build-connector-batch-ingester /layers/dependencies/ ./
-COPY --from=build-connector-batch-ingester /layers/snapshot-dependencies/ ./
-COPY --from=build-connector-batch-ingester /layers/spring-boot-loader/ ./
-COPY --from=build-connector-batch-ingester /layers/application/ ./
+COPY --from=build-plugin-batch-ingester /layers/dependencies/ ./
+COPY --from=build-plugin-batch-ingester /layers/snapshot-dependencies/ ./
+COPY --from=build-plugin-batch-ingester /layers/spring-boot-loader/ ./
+COPY --from=build-plugin-batch-ingester /layers/application/ ./
 USER app
 EXPOSE 9096
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

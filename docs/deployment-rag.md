@@ -122,7 +122,7 @@ A source ingested into after rag-service started therefore becomes searchable wi
 that window, which is what a connector jar dropped into a running deployment needs.
 
 Two consequences worth knowing before deploying a source other than Alfresco or Nuxeo, which today
-means the filesystem connector or any plugin connector on `connector-batch-ingester`:
+means any plugin connector on `plugin-batch-ingester`:
 
 - **Group memberships can only be expanded for a source type that has a resolver.** rag-service holds
   one group resolver per source type, selected by the `<sourceType>` half of `cin_sourceId`; it ships
@@ -395,7 +395,7 @@ embedding/model-runner reachability in one snapshot. Authenticated, since per-so
 information disclosure. Custom `hxpr` and `modelRunner` health contributors also appear under
 `/actuator/health` (component details shown to authenticated callers).
 
-The batch ingesters (`alfresco-batch-ingester`, `nuxeo-batch-ingester`, `filesystem-batch-ingester`)
+The batch ingesters (`alfresco-batch-ingester`, `nuxeo-batch-ingester`, `plugin-batch-ingester`)
 each expose their own `GET /api/status` with the last run's timestamp and discovered / indexed /
 failed counts; the detailed per-job view remains at `GET /api/sync/status`.
 

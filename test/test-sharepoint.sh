@@ -115,11 +115,11 @@ dc() {
 
 cleanup() {
   if [ "$KEEP_RUNNING" = "true" ]; then
-    info "KEEP_RUNNING=true: mock-graph, connector-batch-ingester and ./connectors/${JAR_NAME} are left in place"
+    info "KEEP_RUNNING=true: mock-graph, plugin-batch-ingester and ./connectors/${JAR_NAME} are left in place"
     return
   fi
   info "Removing the connector service, the mock and the jar"
-  dc rm -sf connector-batch-ingester mock-graph >/dev/null 2>&1
+  dc rm -sf plugin-batch-ingester mock-graph >/dev/null 2>&1
   rm -f "connectors/${JAR_NAME}"
   # The two callers are left in place. Alfresco's REST API answers 405 to DELETE /people/{id}, so there is
   # no tidy way to remove them, and pretending to would leave a cleanup step that silently does nothing.
@@ -301,14 +301,14 @@ else
   exit 1
 fi
 
-section "Start connector-batch-ingester with the SharePoint connector"
+section "Start plugin-batch-ingester with the SharePoint connector"
 info "Ingesting drive ${DRIVE_ID} from ${MOCK_INTERNAL} as source ${QUALIFIED_SOURCE}"
-if ! dc build connector-batch-ingester; then
-  fail "S7: connector-batch-ingester image did not build"
+if ! dc build plugin-batch-ingester; then
+  fail "S7: plugin-batch-ingester image did not build"
   exit 1
 fi
-if ! dc up -d --no-deps connector-batch-ingester; then
-  fail "S7: connector-batch-ingester did not start"
+if ! dc up -d --no-deps plugin-batch-ingester; then
+  fail "S7: plugin-batch-ingester did not start"
   exit 1
 fi
 
@@ -322,7 +322,7 @@ if [ "$health" = "200" ]; then
   pass "S7: the ingester came up with the SharePoint connector loaded (${elapsed}s)"
 else
   fail "S7: the ingester never became healthy (last HTTP ${health})"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
   exit 1
 fi
 
@@ -350,7 +350,7 @@ if [ -n "$job_id" ] && [ "$(echo "$job" | jq -r '.sourceType')" = "$SOURCE_TYPE"
   pass "S10: sync started for source type sharepoint (job ${job_id})"
 else
   fail "S10: sync did not start. Response: $(echo "$job" | jq -c .)"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
   exit 1
 fi
 
@@ -373,7 +373,7 @@ if [ "$status" = "COMPLETED" ] && [ "$failed" = "0" ]; then
   pass "S11: the walk completed with no failures (discovered=${discovered} synced=${synced})"
 else
   fail "S11: job status=${status} failed=${failed}: $(echo "$final" | jq -c .)"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
 fi
 
 # Graph does not support $skip on a children collection, so a connector that paged with the host's skip
@@ -463,7 +463,7 @@ find_document "What is the group grant sentinel phrase?" "pangolin-ledger-group"
 # The connector counts what it could not make retrievable. A number in a log is the only way an operator
 # learns that some documents are readable by no one. Its logger is java.util.logging, which Spring Boot
 # bridges into the host's logging, so these lines appear in the service log like any other.
-acl_report=$(dc logs --tail 400 connector-batch-ingester 2>/dev/null \
+acl_report=$(dc logs --tail 400 plugin-batch-ingester 2>/dev/null \
   | grep -c "retrievable only by expanding an Entra group")
 if [ "$acl_report" -gt 0 ]; then
   pass "S18: the run reports how many documents depend on an Entra group"
@@ -476,7 +476,7 @@ fi
 # grep -c rather than grep -q, and the same below: with `set -o pipefail`, grep -q closes the pipe on its
 # first match, docker compose logs dies of SIGPIPE, and the pipeline reports failure for a check that
 # actually succeeded. That cost a debugging cycle here.
-if [ "$(dc logs --tail 400 connector-batch-ingester 2>/dev/null | grep -c 'Graph resource units')" -gt 0 ]; then
+if [ "$(dc logs --tail 400 plugin-batch-ingester 2>/dev/null | grep -c 'Graph resource units')" -gt 0 ]; then
   pass "S19: the run reports the Graph resource units it spent per document"
 else
   fail "S19: no resource-unit report in the ingester log"
@@ -503,7 +503,7 @@ else
   fail "S21: the second sync did not start: $(echo "$job2" | jq -c .)"
 fi
 
-if [ "$(dc logs --tail 200 connector-batch-ingester 2>/dev/null \
+if [ "$(dc logs --tail 200 plugin-batch-ingester 2>/dev/null \
         | grep -c 'completed via the change feed')" -gt 0 ]; then
   pass "S22: the second pass read the change feed instead of walking"
 else

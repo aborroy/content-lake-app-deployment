@@ -6,19 +6,21 @@
 #   make up-nuxeo           Nuxeo + HXPR + RAG  (~9 services, 2 from ../nuxeo-deployment)
 #   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~18 services)
 #   make up-demo            Full + standalone demo UI at /  (~19 services)
-#   Filesystem connector (opt-in): add the 'filesystem' profile to a base stack, e.g.
-#     docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester
-#     (drop files in ./filesystem-data or set FILESYSTEM_HOST_PATH, then POST /api/sync/configured
-#      with FILESYSTEM_SYNC_USERNAME/FILESYSTEM_SYNC_PASSWORD; both are required to start)
 #   Plugin connector (opt-in): add the 'connector' profile to a base stack, e.g.
 #     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
-#       docker compose --profile alfresco --profile connector up -d --build connector-batch-ingester
+#       docker compose --profile alfresco --profile connector up -d --build plugin-batch-ingester
 #     (ingests through a connector jar in ./connectors, on :9096. The jar is its only source, so the
 #      service fails to start with that directory empty. Supply the connector's own settings as
 #      environment variables using the names its schema declares -- hyphens become underscores, so
 #      `sample-directory.root-path` is SAMPLE_DIRECTORY_ROOT_PATH -- then POST /api/sync/configured.
-#      GET /api/connectors lists what loaded and anything that failed to;
-#      ../content-lake-app/plugins/examples has a working connector to build)
+#      GET /api/connectors lists what loaded and anything that failed to)
+#     The filesystem source runs this way since content-lake-app#148, in place of its own profile:
+#       CONNECTOR_SOURCE_TYPE=filesystem FILESYSTEM_ROOT_PATH=/data/connector \
+#       CONNECTOR_HOST_PATH=./filesystem-data CONNECTOR_SYNC_USERNAME=admin \
+#       CONNECTOR_SYNC_PASSWORD=admin \
+#         docker compose --profile alfresco --profile connector up -d
+#     (build the jar with `mvn -f plugins/filesystem-connector/pom.xml package` and copy it into
+#      ./connectors/ first; the setting names are the ones the old profile used)
 #   Mock Microsoft Graph (opt-in): add the 'sharepoint-mock' profile alongside 'connector', e.g.
 #     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
 #     CONNECTOR_SOURCE_TYPE=sharepoint SHAREPOINT_AUTH_MODE=static-token \
@@ -42,7 +44,7 @@
 #     (adds the liteparse T-Engine, which converts PDF/DOCX/XLSX/PPTX/DOC to Markdown so tables
 #      survive chunking as ChunkType.TABLE instead of being flattened into prose. EXTRACTION_FORMAT
 #      defaults to 'plaintext', so the profile on its own changes nothing -- set auto or markdown.
-#      For Nuxeo and the filesystem connector use EXTRACTION_ENGINE_URL instead of TRANSFORM_URL.
+#      For Nuxeo and for a plugin connector use EXTRACTION_ENGINE_URL instead of TRANSFORM_URL.
 #      liteparse recovers headings but NOT tables (~0.3s/PDF); transform-convert2md recovers real
 #      markdown tables but costs ~20s/PDF and is PDF-only. Point the URL at whichever fits the corpus.
 #      Extraction always degrades to Tika, so a missing or slow engine never fails an ingest)
@@ -201,14 +203,14 @@ verify-profiles: ## Assert every opt-in profile stays opt-in (no service leaks i
 	@fail=0; \
 	for profile in alfresco nuxeo full demo; do \
 	  services=$$($(DC) --profile $$profile config --services 2>/dev/null | sort | tr '\n' ' '); \
-	  for optin in otel-lgtm filesystem-batch-ingester connector-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md mock-graph; do \
+	  for optin in otel-lgtm plugin-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md mock-graph; do \
 	    case " $$services " in \
 	      *" $$optin "*) echo "FAIL: $$optin is in the '$$profile' profile but should be opt-in only"; fail=1 ;; \
 	    esac; \
 	  done; \
 	  echo "ok: profile '$$profile' has no opt-in service"; \
 	done; \
-	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "connector:connector-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse" "sharepoint-mock:mock-graph"; do \
+	for pair in "observability:otel-lgtm" "connector:plugin-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse" "sharepoint-mock:mock-graph"; do \
 	  profile=$${pair%%:*}; service=$${pair##*:}; \
 	  services=$$($(DC) --profile demo --profile $$profile config --services 2>/dev/null | tr '\n' ' '); \
 	  case " $$services " in \

@@ -1,7 +1,7 @@
 # Text Extraction and the `transform-extras` Profile
 
 How binary documents become text, why that decides whether tables survive retrieval, and how to turn
-on structure-aware extraction. Applies to every content source: Alfresco, Nuxeo and filesystem.
+on structure-aware extraction. Applies to every content source: Alfresco, Nuxeo and any plugin connector.
 
 ## Why this matters
 
@@ -110,7 +110,7 @@ EXTRACTION_FORMAT=auto EXTRACTION_ENGINE_URL=http://transform-liteparse:8090 \
 
 # Filesystem connector
 EXTRACTION_FORMAT=auto EXTRACTION_ENGINE_URL=http://transform-liteparse:8090 \
-  docker compose --profile alfresco --profile filesystem --profile transform-extras up -d
+  docker compose --profile alfresco --profile connector --profile transform-extras up -d
 ```
 
 The profile on its own changes nothing: without `EXTRACTION_FORMAT` and a URL pointing at the engine,

@@ -107,7 +107,7 @@ cleanup() {
     return
   fi
   info "Removing the connector service and its jar"
-  dc rm -sf connector-batch-ingester >/dev/null 2>&1
+  dc rm -sf plugin-batch-ingester >/dev/null 2>&1
   rm -f "connectors/${JAR_NAME}"
   if [ -n "$FOLDER_ID" ]; then
     curl -s $CURL_OPTS -o /dev/null -u "$ALF_AUTH" -X DELETE \
@@ -249,7 +249,7 @@ cp "$BUILT_JAR" "connectors/${JAR_NAME}"
 chmod 644 "connectors/${JAR_NAME}"
 
 
-section "Start connector-batch-ingester with the CMIS connector"
+section "Start plugin-batch-ingester with the CMIS connector"
 # The deployment's own configuration, sourced HERE and this run's settings re-applied AFTERWARDS:
 # `set -a; . ./.env` assigns unconditionally, so anything exported before this point is overwritten.
 set -a
@@ -272,12 +272,12 @@ info "Ingesting ${CMIS_ROOT_PATH} over CMIS from ${CMIS_URL}"
 
 # Build and start as two steps, never `up --build`: `--build` applies to dependencies too, and would
 # rebuild hxpr-app, whose build clones the private ai-ready-index.
-if ! dc build connector-batch-ingester; then
-  fail "C8: connector-batch-ingester image did not build"
+if ! dc build plugin-batch-ingester; then
+  fail "C8: plugin-batch-ingester image did not build"
   exit 1
 fi
-if ! dc up -d --no-deps connector-batch-ingester; then
-  fail "C8: connector-batch-ingester did not start"
+if ! dc up -d --no-deps plugin-batch-ingester; then
+  fail "C8: plugin-batch-ingester did not start"
   exit 1
 fi
 
@@ -291,7 +291,7 @@ if [ "$health" = "200" ]; then
   pass "C8: the ingester came up with the CMIS connector loaded (${elapsed}s)"
 else
   fail "C8: the ingester never became healthy (last HTTP ${health})"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
   exit 1
 fi
 
@@ -320,7 +320,7 @@ if [ -n "$job_id" ] && [ "$(echo "$job" | jq -r '.sourceType')" = "$SOURCE_TYPE"
   pass "C11: sync started for source type cmis (job ${job_id})"
 else
   fail "C11: sync did not start. Response: $(echo "$job" | jq -c .)"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
   exit 1
 fi
 
@@ -338,7 +338,7 @@ if [ "$status" = "COMPLETED" ] && [ "$failed" = "0" ]; then
   pass "C12: the CMIS job completed with no failures in ${elapsed}s (discovered=${discovered} synced=${synced})"
 else
   fail "C12: job status=${status} failed=${failed}: $(echo "$final" | jq -c .)"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
 fi
 
 # #125's first acceptance criterion, without paying for a second ingest: the CMIS traversal found exactly

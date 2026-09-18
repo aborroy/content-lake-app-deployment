@@ -17,19 +17,19 @@ reported there and in the container log.
 Whether that also stops the ingester depends on which one it is. The five that never ingest from a jar
 default `CONNECTOR_VALIDATION` to `warn`, so an unconfigured connector is reported and they start anyway:
 they were not going to use it, and stopping an unrelated ingestion over it would be a failure the operator
-cannot act on. `connector-batch-ingester` defaults to `fail`, since a connector it cannot load leaves it
+cannot act on. `plugin-batch-ingester` defaults to `fail`, since a connector it cannot load leaves it
 with no source at all. Set `CONNECTOR_VALIDATION_INGESTERS=fail` to make the other five strict too.
 
 ## Ingesting with it
 
 Every ingester *loads* a connector; only one *ingests* with it. The Alfresco, Nuxeo and filesystem
 ingesters each drive a client they were compiled against, so for them the listing above is all a mounted
-jar does. `connector-batch-ingester`, on the `connector` profile, takes its client,
+jar does. `plugin-batch-ingester`, on the `connector` profile, takes its client,
 scope rules and optionally its extractor from the jar:
 
 ```bash
 CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
-  docker compose --profile alfresco --profile connector up -d --build connector-batch-ingester
+  docker compose --profile alfresco --profile connector up -d --build plugin-batch-ingester
 
 curl -u admin:admin http://localhost:9096/api/connectors           # what loaded, and from which jar
 curl -u admin:admin http://localhost:9096/api/connectors/schema    # what it wants configured
@@ -65,7 +65,7 @@ jars and behaves exactly as it did before.
 
 ## Keeping state between runs
 
-`connector-batch-ingester` mounts one writable directory and publishes its path as
+`plugin-batch-ingester` mounts one writable directory and publishes its path as
 `CONNECTOR_STATE_DIRECTORY`, default `/var/lib/content-lake/connector`. Everything else that service
 mounts is read-only, including this directory of jars.
 
@@ -80,7 +80,7 @@ own:** a connector that needs state declares its own setting in its `ConnectorSc
 
 ```bash
 MY_SOURCE_STATE_DIRECTORY=/var/lib/content-lake/connector \
-  docker compose --profile alfresco --profile connector up -d connector-batch-ingester
+  docker compose --profile alfresco --profile connector up -d plugin-batch-ingester
 ```
 
 Not every connector needs it. The shipped SharePoint connector keeps its delta cursor through the host's own
@@ -97,7 +97,7 @@ project's standing rule is that every test run starts from an empty index, and s
 `make clean` would reintroduce the staleness that rule exists to prevent. Treat a missing cursor as
 normal and fall back to a full enumeration; it is the state you will be in after every wipe.
 
-Only `connector-batch-ingester` gets the mount. A jar is loaded by all six ingesters, but this is the only
+Only `plugin-batch-ingester` gets the mount. A jar is loaded by all six ingesters, but this is the only
 one that ingests from the registry, so it is the only one with state to keep.
 
 ## The shipped connectors
@@ -110,7 +110,7 @@ arrive as environment variables like any other, using the names their schemas de
 | CMIS 1.1 | `cmis-connector-1.0.0.jar` | `CMIS_URL`, `CMIS_USERNAME`, `CMIS_PASSWORD`, `CMIS_ROOT_PATH`, ... |
 | SharePoint Online | `sharepoint-connector-1.0.0.jar` | `SHAREPOINT_DRIVE_IDS`, `SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, `SHAREPOINT_CLIENT_SECRET`, ... |
 
-Both are declared with defaults in the `connector-batch-ingester` block of `compose.content-lake.yaml`, where
+Both are declared with defaults in the `plugin-batch-ingester` block of `compose.content-lake.yaml`, where
 each setting carries a comment about what it does. The full tables are in
 `../content-lake-app/docs/configuration.md`.
 

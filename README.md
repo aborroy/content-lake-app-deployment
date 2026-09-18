@@ -39,37 +39,24 @@ make up-full           # Alfresco + Nuxeo + HXPR + RAG  (~18 services)
 make up-demo           # full + standalone demo UI at /  (~19 services)
 ```
 
-The `filesystem-batch-ingester` is an opt-in connector in its own `filesystem` profile (kept out of
-`full`/`demo` so those keep building from the default branch). Add it to any base stack that provides
-hxpr, e.g. `docker compose --profile alfresco --profile filesystem up -d --build filesystem-batch-ingester`.
-It ingests a mounted directory (default `./filesystem-data`, override with `FILESYSTEM_HOST_PATH`) and
-stays idle until you trigger `POST /api/sync/configured`, so an empty directory is harmless.
+A mounted directory is one of those plugins since `content-lake-app#148`, in place of the retired
+`filesystem` profile. Build `plugins/filesystem-connector` into [`connectors/`](connectors/), mount the
+content at `CONNECTOR_HOST_PATH` (default `./filesystem-data`), and set `CONNECTOR_SOURCE_TYPE=filesystem`.
+The `FILESYSTEM_*` setting names are unchanged, so an existing configuration carries over; the sync API is
+guarded by `CONNECTOR_SYNC_USERNAME` and `CONNECTOR_SYNC_PASSWORD` rather than the retired
+`FILESYSTEM_SYNC_*` pair, because a filesystem has no user directory to authenticate callers against and
+neither has a default.
 
-A filesystem source has no user directory, so unlike the Alfresco and Nuxeo ingesters this service
-cannot authenticate callers against a repository. It guards its sync API with one configured account
-instead, from `FILESYSTEM_SYNC_USERNAME` and `FILESYSTEM_SYNC_PASSWORD`. Neither has a default and
-the container refuses to start unless both are set, so the endpoint that triggers a full re-ingest is
-never reachable with a credential shipped in this repository. Both keys are present but empty in
-`.env`; put your own values in `.env.local`, which is not tracked.
-
-The service publishes no host port, so reach it through the proxy, which routes `?sourceType=filesystem`
-to it and forwards your `Authorization` header unchanged:
-
-```bash
-curl -u "$FILESYSTEM_SYNC_USERNAME:$FILESYSTEM_SYNC_PASSWORD" \
-  -X POST 'http://localhost/api/sync/configured?sourceType=filesystem'
-```
-
-The `connector-batch-ingester` is a second opt-in service, in its own `connector` profile, and it is the
-one that ingests through a connector plugin. A jar in [`connectors/`](connectors/) is discovered by every
-ingester, but the Alfresco, Nuxeo and filesystem ingesters each drive a client they were compiled against,
-so for them a mounted connector is only listed. This service takes its client, scope rules and optionally
+The `plugin-batch-ingester` is an opt-in service in its own `connector` profile, and it is the one that
+ingests through a connector plugin. A jar in [`connectors/`](connectors/) is discovered by every ingester,
+but the Alfresco and Nuxeo ingesters each drive a client they were compiled against, so for them a mounted
+connector is only listed. This service takes its client, scope rules and optionally
 its extractor from the jar, which means a new source needs no Maven module, no Dockerfile edit and no
 change to `compose.content-lake.yaml`:
 
 ```bash
 CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
-  docker compose --profile alfresco --profile connector up -d --build connector-batch-ingester
+  docker compose --profile alfresco --profile connector up -d --build plugin-batch-ingester
 
 curl -u admin:admin http://localhost:9096/api/connectors
 curl -u admin:admin -X POST http://localhost:9096/api/sync/configured
@@ -77,7 +64,7 @@ curl -u admin:admin -X POST http://localhost:9096/api/sync/configured
 
 Its source is that jar, so with `connectors/` empty it fails to start rather than idling. Set
 `CONNECTOR_SOURCE_TYPE` when several jars are mounted, and `CONNECTOR_ROOTS` when the connector does not
-name its own root container. Its sync API is guarded the same way the filesystem one is, from
+name its own root container. Its sync API is guarded by one configured account, from
 `CONNECTOR_SYNC_USERNAME` and `CONNECTOR_SYNC_PASSWORD`, with no defaults.
 [`connectors/README.md`](connectors/README.md) has the rest, including how a connector's own settings are
 passed in.
@@ -106,7 +93,7 @@ infrastructure (network, named volumes, build secrets) and pulls in the rest via
 | [`compose.yaml`](compose.yaml) | Shared network, volumes, secrets + `include:` list |
 | [`compose.alfresco.yaml`](compose.alfresco.yaml) | Alfresco: postgres, activemq, alfresco, transform-core-aio, batch-indexer\*, control-center\* |
 | [`compose.hxpr.yaml`](compose.hxpr.yaml) | HXPR platform: hxpr-app, mongodb, opensearch, opensearch-dashboards (`debug` profile) |
-| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, filesystem-batch-ingester, connector-batch-ingester |
+| [`compose.content-lake.yaml`](compose.content-lake.yaml) | Content Lake services: batch-ingester, live-ingester, rag-service, nuxeo-batch-ingester, nuxeo-live-ingester, plugin-batch-ingester, mock-graph |
 | [`compose.ui.yaml`](compose.ui.yaml) | UI and proxy: content-app, content-lake-app-ui (demo only), proxy |
 | [`compose.observability.yaml`](compose.observability.yaml) | Trace backend for the RAG spans: otel-lgtm (`observability` profile) |
 
@@ -130,10 +117,10 @@ The directory is empty by default and an empty directory changes nothing. Overri
 `CONNECTOR_PLUGIN_PATH`. A jar that cannot be read, or whose configuration does not satisfy the schema it
 publishes, is reported by that endpoint and in the log. The five ingesters that never ingest from a jar
 start anyway (`CONNECTOR_VALIDATION` defaults to `warn` for them, since a connector they were not going to
-use should not stop their own ingestion); `connector-batch-ingester` defaults to `fail`, because for it that
+use should not stop their own ingestion); `plugin-batch-ingester` defaults to `fail`, because for it that
 jar is the only source. `CONNECTOR_VALIDATION_INGESTERS=fail` makes the other five strict as well.
 
-`connector-batch-ingester` also mounts one writable directory, published as `CONNECTOR_STATE_DIRECTORY`
+`plugin-batch-ingester` also mounts one writable directory, published as `CONNECTOR_STATE_DIRECTORY`
 (`/var/lib/content-lake/connector`), for state a connector cannot recompute such as a change cursor or a
 delta token. It is a named volume, so `make clean` wipes it and `make down` does not, and a connector
 should treat a missing cursor as normal. Nothing reads the variable by itself: a connector declares its
@@ -144,7 +131,7 @@ Note that the connector's own settings still have to reach the service. A plugin
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.
 
 Two connectors come with the project. `../content-lake-app/plugins/cmis-connector` is a real source for
-any CMIS 1.1 repository, and `connector-batch-ingester` already declares its `CMIS_*` settings, so it needs
+any CMIS 1.1 repository, and `plugin-batch-ingester` already declares its `CMIS_*` settings, so it needs
 only the jar and the values. `../content-lake-app/plugins/examples/sample-directory-connector` is
 a hundred-line worked example to read before writing one.
 
@@ -361,7 +348,7 @@ someone else, change at least these:
 | `SHARED_SECRET` | a fixed string | the Alfresco to Solr shared secret; anyone holding it can talk to Solr as the repository |
 | `POSTGRES_PASSWORD`, `ACTIVEMQ_PASSWORD` | vendor defaults | direct database and broker access |
 
-`FILESYSTEM_SYNC_USERNAME` and `FILESYSTEM_SYNC_PASSWORD` are deliberately the exception: they ship
+`CONNECTOR_SYNC_USERNAME` and `CONNECTOR_SYNC_PASSWORD` are deliberately the exception: they ship
 empty and the service refuses to start until you supply them, because the endpoint they guard
 triggers a full re-ingest. Put overrides for any of the above in `.env.local`, which is not tracked.
 
@@ -428,7 +415,7 @@ Only the proxy is published on the host on port `80`.
 | `http://localhost/nuxeo/` | nuxeo, full, demo |
 | `http://localhost/api/rag/` | all profiles |
 | `http://localhost/api/content-lake/` | alfresco, full, demo |
-| `http://localhost/api/sync/` | all profiles (routes to the alfresco, nuxeo or filesystem ingester via `?sourceType=`) |
+| `http://localhost/api/sync/` | all profiles (routes to the alfresco or nuxeo ingester via `?sourceType=`) |
 | `http://localhost:5601/` | OpenSearch Dashboards, `debug` profile only (opt-in, unauthenticated) |
 
 ## Nuxeo Demo Content
@@ -483,7 +470,7 @@ Key overrides:
 | `LLM_MODEL` | `ai/qwen2.5` | Chat/RAG model |
 | `EXTRACTION_FORMAT` | `plaintext` | `plaintext`, `auto` or `markdown`. Whether extraction asks a transform engine for markdown, so headings and tables survive chunking. See [docs/extraction.md](docs/extraction.md) |
 | `TRANSFORM_URL` | `http://transform-core-aio:8090` | Transform engine for the Alfresco ingesters. Point at `http://transform-liteparse:8090` or `http://transform-convert2md:8090` with the `transform-extras` profile |
-| `EXTRACTION_ENGINE_URL` | *(empty)* | Transform engine for the Nuxeo and filesystem ingesters, which have none by default. Empty leaves them on in-process Tika |
+| `EXTRACTION_ENGINE_URL` | *(empty)* | Transform engine for the Nuxeo ingesters and any plugin connector, which have none by default. Empty leaves them on in-process Tika |
 | `EXTRACTION_ENGINE_TIMEOUT_MS` | `300000` | Read timeout for the above. Do not lower it: `convert2md` needs tens of seconds per PDF |
 | `TRANSFORM_EXTRAS_TAG` | `1.1.0` | `transform-liteparse` image tag. 1.1.0 or newer is required for spreadsheet tables |
 | `TRANSFORM_CONVERT2MD_TAG` | `1.1.0` | `transform-convert2md` image tag |
@@ -589,7 +576,7 @@ run. If the script is interrupted or exits with failures, the log file is kept f
 
 `test/test-connector.sh` proves the plugin path end to end: it builds the sample connector from
 `../content-lake-app/plugins/examples/sample-directory-connector` inside a Maven container,
-drops the jar into `connectors/`, starts `connector-batch-ingester` on top of a base stack that is already
+drops the jar into `connectors/`, starts `plugin-batch-ingester` on top of a base stack that is already
 running, triggers a sync and asserts the fixture documents come back out of semantic search.
 
 Opt-in, like the profile it exercises, so it is not a phase of `test/run-tests.sh`. It needs a base stack

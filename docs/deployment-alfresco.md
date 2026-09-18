@@ -162,8 +162,8 @@ default 0.10 trips on a single legitimate deletion:
 | `INGESTION_RECONCILE_MAX_SEEN_IDS` | `200000` | Bound on the node ids retained from discovery. Above it the sweep deletes nothing |
 | `INGESTION_RECONCILE_PAGE_SIZE` | `200` | Documents per page when scanning the index |
 
-The Nuxeo and filesystem ingesters take the same five under `NUXEO_BATCH_RECONCILE_*` and
-`FILESYSTEM_BATCH_RECONCILE_*`.
+The Nuxeo ingesters and the plugin host take the same five under `NUXEO_BATCH_RECONCILE_*` and
+`CONNECTOR_BATCH_RECONCILE_*`.
 
 Read the result off the job rather than inferring it from the index:
 
@@ -176,7 +176,7 @@ a corpus that has accumulated drift will abort on the ratio guard**, because a c
 stale documents is indistinguishable from a broken discovery pass. That is the guard working: read the
 logged figures, confirm the deletions are genuine, raise the ratio for one run, then lower it again.
 
-The filesystem source has no live ingester, so there this sweep is the only path that ever deletes.
+A plugin connector has no live ingester, so there this sweep is the only path that ever deletes.
 
 ---
 

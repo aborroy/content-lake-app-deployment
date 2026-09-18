@@ -2,7 +2,7 @@
 # test-connector.sh - end-to-end proof that a connector jar can ingest (#132).
 #
 # Builds the sample connector from ../content-lake-app/plugins/examples, drops the jar into
-# ./connectors, starts connector-batch-ingester on top of an already-running base stack, triggers a sync
+# ./connectors, starts plugin-batch-ingester on top of an already-running base stack, triggers a sync
 # and asserts the fixture documents are retrievable through the RAG service.
 #
 # Opt-in, and deliberately not a phase of run-tests.sh: the 'connector' profile is opt-in like
@@ -101,11 +101,11 @@ cleanup() {
     dc up -d --no-deps --no-build rag-service >/dev/null 2>&1
   fi
   if [ "$KEEP_RUNNING" = "true" ]; then
-    info "KEEP_RUNNING=true: connector-batch-ingester and ./connectors/${JAR_NAME} left in place"
+    info "KEEP_RUNNING=true: plugin-batch-ingester and ./connectors/${JAR_NAME} left in place"
     return
   fi
   info "Removing the connector service and its jar"
-  dc rm -sf connector-batch-ingester >/dev/null 2>&1
+  dc rm -sf plugin-batch-ingester >/dev/null 2>&1
   rm -f "connectors/${JAR_NAME}"
 }
 trap cleanup EXIT
@@ -194,7 +194,7 @@ chmod 644 "connectors/${JAR_NAME}"
 pass "T2: jar copied into ./connectors"
 
 # ── Start the ingester ─────────────────────────────────────────────────────────
-section "Start connector-batch-ingester"
+section "Start plugin-batch-ingester"
 # The deployment's own configuration, which carries HXPR_REPOSITORY_ID and the hxpr credentials this
 # service needs. Sourced HERE, and this run's settings re-applied AFTERWARDS: `set -a; . ./.env`
 # assigns unconditionally, and .env holds empty CONNECTOR_SYNC_* placeholders plus a
@@ -221,12 +221,12 @@ info "Building from CONTENT_LAKE_GIT_CONTEXT=${CONTENT_LAKE_GIT_CONTEXT}"
 # dependencies included, so it rebuilds hxpr-app -- whose build clones the private ai-ready-index and
 # needs HXPR_GIT_AUTH_TOKEN. `--no-deps` then starts only this service, since the base stack is
 # already up and healthy.
-if ! dc build connector-batch-ingester; then
-  fail "T3: connector-batch-ingester image did not build"
+if ! dc build plugin-batch-ingester; then
+  fail "T3: plugin-batch-ingester image did not build"
   exit 1
 fi
-if ! dc up -d --no-deps connector-batch-ingester; then
-  fail "T3: connector-batch-ingester did not start"
+if ! dc up -d --no-deps plugin-batch-ingester; then
+  fail "T3: plugin-batch-ingester did not start"
   exit 1
 fi
 
@@ -243,7 +243,7 @@ if [ "$health" = "200" ]; then
   pass "T3: the ingester came up with the connector loaded (${elapsed}s)"
 else
   fail "T3: the ingester never became healthy (last HTTP ${health})"
-  dc logs --tail 60 connector-batch-ingester
+  dc logs --tail 60 plugin-batch-ingester
   exit 1
 fi
 
@@ -314,7 +314,7 @@ if [ "$status" = "COMPLETED" ]; then
   pass "T11: the job completed in ${elapsed}s"
 else
   fail "T11: job status is ${status} after ${elapsed}s: $(echo "$final" | jq -c .)"
-  dc logs --tail 80 connector-batch-ingester
+  dc logs --tail 80 plugin-batch-ingester
 fi
 
 discovered=$(echo "$final" | jq -r '.discoveredCount // 0')
