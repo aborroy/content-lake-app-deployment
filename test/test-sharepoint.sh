@@ -76,8 +76,8 @@ JAR_NAME="sharepoint-connector-1.0.0.jar"
 BUILT_JAR="${CONNECTOR_DIR}/target/${JAR_NAME}"
 SOURCE_TYPE="sharepoint"
 DRIVE_ID="b!mock-drive-id"
-# The mock's fixture tree holds 7 documents reachable from the root, in 7 containers.
-EXPECTED_DOCUMENTS=7
+# The mock's fixture tree holds 8 documents reachable from the root, in 7 containers.
+EXPECTED_DOCUMENTS=8
 
 # A source id unique to this run. The mock's fixtures are static, so two runs ingest identical text; without
 # this, an assertion could pass on a document the previous run left behind, and an absence assertion could
@@ -356,6 +356,12 @@ find_document "Which document was shared with an organisation wide link?" "pango
   "org-wide.txt is retrievable, so an organisation link maps to everyone" "S13"
 find_document "What is the incident log sentinel phrase?" "pangolin-ledger-incident" \
   "incident-log.md is retrievable, and markdown skips the extractor entirely" "S14"
+# The only fixture that is not text or markdown, and therefore the only one that proves the extraction path
+# runs at all: NodeSyncService short-circuits text/* before any extractor is consulted, so a corpus of text
+# fixtures says nothing about whether a binary from SharePoint becomes searchable. No transform service backs
+# a plugin connector, so this is the host's in-process Tika.
+find_document "What does the quarterly financial report say?" "pangolin-ledger-pdf-report" \
+  "quarterly-report.pdf is retrievable, so in-process Tika extracted a binary" "S14b"
 # deep-document.txt is two levels down AND granted through a users-scoped sharing link to Carol alone, so
 # the assertion about it is an absence: a link scope of "users" grants the named identities and nobody else,
 # and mapping it to everyone would be the most plausible way to get this wrong. That the walk descended two
