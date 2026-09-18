@@ -264,3 +264,31 @@ USER app
 EXPOSE 9096
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD wget -qO- http://localhost:9096/actuator/health || exit 1
+
+
+############################################################
+# mock-graph (8099): a stand-in for Microsoft Graph, for the sharepoint-mock profile
+############################################################
+# Test tooling rather than a product service, and the only image here that builds no Maven module: the
+# mock is a single dependency-free source file, so the JDK's source launcher runs it as it stands. That is
+# also why it takes no part in the `poms` stage above, and why adding it did not touch the module list.
+#
+# A JDK rather than the shared runtime-base, which is a JRE: `java Foo.java` compiles in memory and needs
+# a compiler. The same file runs in process from the connector's unit tests, so there is one copy of the
+# mock's behaviour rather than a container drifting from what the tests assert.
+FROM eclipse-temurin:25-jdk-alpine AS mock-graph
+RUN addgroup -S app && adduser -S -G app app
+WORKDIR /app
+# The package directories are preserved rather than flattened, because the source launcher refuses a file
+# whose path does not match its declared package: `java MockGraphServer.java` on a copy at /app answers
+# "end of path to source file does not match its package name". That is why it runs from the source root
+# on a developer's machine and needs the same shape here.
+COPY --from=code plugins/sharepoint-connector/src/test/java/org/hyland/contentlake/connector/sharepoint/mock/MockGraphServer.java \
+     ./org/hyland/contentlake/connector/sharepoint/mock/MockGraphServer.java
+COPY --from=code plugins/sharepoint-connector/src/test/resources/fixtures/ /fixtures/
+USER app
+EXPOSE 8099
+ENV MOCK_GRAPH_FIXTURES=/fixtures
+# No HEALTHCHECK on purpose: every Graph path requires a bearer token, so an unauthenticated probe would
+# answer 401 and mark the container unhealthy. The suite waits on a real request instead.
+ENTRYPOINT ["java","org/hyland/contentlake/connector/sharepoint/mock/MockGraphServer.java"]

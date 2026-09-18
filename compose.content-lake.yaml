@@ -461,6 +461,54 @@ services:
       # sync-account (readable by CMIS_USERNAME only) or public (readable by everyone). A repository
       # whose permissions cannot be read must not silently produce world-readable documents.
       CMIS_ACL_FALLBACK: ${CMIS_ACL_FALLBACK:-fail-closed}
+      # Settings for the SharePoint Online connector in
+      # ../content-lake-app/plugins/sharepoint-connector, which ingests SharePoint through Microsoft
+      # Graph. Empty unless a deployment sets them, and the schema is what refuses to load the jar when a
+      # required one is missing, naming the setting. That refusal is by design: with every connector jar
+      # mounted, an unconfigured one declines to load instead of becoming a second candidate.
+      #
+      # Node ids are '<driveId>:<itemId>', so CONNECTOR_ROOTS takes composite values. Leave it empty for a
+      # single drive, which the connector can answer for itself.
+      SHAREPOINT_DRIVE_IDS: ${SHAREPOINT_DRIVE_IDS:-}
+      SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:-}
+      SHAREPOINT_TENANT_ID: ${SHAREPOINT_TENANT_ID:-}
+      SHAREPOINT_AUTHORITY: ${SHAREPOINT_AUTHORITY:-}
+      # client-credentials is app-only and the only supported deployment mode. static-token exists for a
+      # run against the mock Graph service, and for validating ACL mapping against a developer's own
+      # OneDrive; the token it takes cannot be refreshed, so a restarted container cannot authenticate.
+      SHAREPOINT_AUTH_MODE: ${SHAREPOINT_AUTH_MODE:-client-credentials}
+      # Supply a secret or a certificate, never both. A certificate is preferred in a deployment because a
+      # secret expires on a date nobody diarises and takes the crawl down when it does.
+      SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET:-}
+      SHAREPOINT_CERTIFICATE_PATH: ${SHAREPOINT_CERTIFICATE_PATH:-}
+      SHAREPOINT_CERTIFICATE_PASSWORD: ${SHAREPOINT_CERTIFICATE_PASSWORD:-}
+      SHAREPOINT_ACCESS_TOKEN: ${SHAREPOINT_ACCESS_TOKEN:-}
+      # Point this at the mock Graph service to run without a tenant:
+      #   SHAREPOINT_GRAPH_BASE_URL=http://mock-graph:8099/v1.0
+      SHAREPOINT_GRAPH_BASE_URL: ${SHAREPOINT_GRAPH_BASE_URL:-}
+      SHAREPOINT_SOURCE_ID: ${SHAREPOINT_SOURCE_ID:-}
+      SHAREPOINT_INCLUDE_PATHS: ${SHAREPOINT_INCLUDE_PATHS:-}
+      SHAREPOINT_EXCLUDE_PATHS: ${SHAREPOINT_EXCLUDE_PATHS:-}
+      SHAREPOINT_INCLUDE_MIME_TYPES: ${SHAREPOINT_INCLUDE_MIME_TYPES:-}
+      SHAREPOINT_EXCLUDE_MIME_TYPES: ${SHAREPOINT_EXCLUDE_MIME_TYPES:-}
+      # fail-closed (the default, do not ingest an item whose permissions cannot be read) or public
+      # (readable by everyone). There is no sync-account option as there is for CMIS: app-only auth has no
+      # user account whose access could stand in for a document's.
+      SHAREPOINT_ACL_FALLBACK: ${SHAREPOINT_ACL_FALLBACK:-fail-closed}
+      # map (emit GROUP_<objectId> faithfully) or skip (omit group principals, so a group-only item is
+      # readable by nobody). Deliberately no option that widens a group grant to the whole tenant.
+      #
+      # Either way, a document granted only to an Entra ID group is retrievable by nobody today: nothing
+      # expands Entra group membership at query time. Each run logs how many documents that affects.
+      SHAREPOINT_GROUP_GRANTS: ${SHAREPOINT_GROUP_GRANTS:-map}
+      # Display names meaning every user in the tenant, for a tenant that words "Everyone except external
+      # users" differently. Empty uses the documented English names plus the spo-grid-all-users claim.
+      SHAREPOINT_EVERYONE_CLAIMS: ${SHAREPOINT_EVERYONE_CLAIMS:-}
+      # Below Graph's documented per-application per-tenant cap of 1250 units a minute, because that cap
+      # is shared by everything using the same app registration. Permissions cost 5 units per item, so a
+      # crawl is about 6 units per document. Zero disables metering, which is only right against the mock.
+      SHAREPOINT_RESOURCE_UNITS_PER_MINUTE: ${SHAREPOINT_RESOURCE_UNITS_PER_MINUTE:-1000}
+      SHAREPOINT_RESOURCE_UNIT_BURST: ${SHAREPOINT_RESOURCE_UNIT_BURST:-200}
       # No repository transform service backs a plugin connector, so extraction is in-process Tika
       # unless an engine is configured. A connector that converts its own content bypasses this.
       EXTRACTION_ENGINE_URLS: ${EXTRACTION_ENGINE_URLS:-}
@@ -489,6 +537,22 @@ services:
       CONNECTOR_BATCH_RECONCILE_MAX_DELETES: ${CONNECTOR_BATCH_RECONCILE_MAX_DELETES:-1000}
       CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS: ${CONNECTOR_BATCH_RECONCILE_MAX_SEEN_IDS:-200000}
       CONNECTOR_BATCH_RECONCILE_PAGE_SIZE: ${CONNECTOR_BATCH_RECONCILE_PAGE_SIZE:-200}
+      # Read the connector's change feed instead of walking it, when the connector has one. Off by
+      # default, and every condition fails towards walking, which is the authoritative mechanism: the
+      # feature has to be on, the connector has to claim a feed, and a cursor has to already be stored.
+      # The first pass therefore always walks and seeds a cursor; only later passes read the feed.
+      CONNECTOR_CHANGE_FEED_ENABLED: ${CONNECTOR_CHANGE_FEED_ENABLED:-false}
+      CONNECTOR_CHANGE_FEED_PAGE_SIZE: ${CONNECTOR_CHANGE_FEED_PAGE_SIZE:-200}
+      CONNECTOR_CHANGE_FEED_MAX_PAGES: ${CONNECTOR_CHANGE_FEED_MAX_PAGES:-100}
+      # Force a full walk, with the reconciliation sweep as configured, every N incremental passes. Zero
+      # never forces one, which is right for a feed that reports deletions first-hand.
+      CONNECTOR_CHANGE_FEED_FULL_WALK_EVERY: ${CONNECTOR_CHANGE_FEED_FULL_WALK_EVERY:-0}
+      # Where the cursor lives. hxpr (the default) keeps one state document per source in the index and so
+      # needs nothing the deployment does not already have; file uses the writable mount below; memory
+      # forgets it on restart, which means every pass walks.
+      CONNECTOR_CURSOR_STORE: ${CONNECTOR_CURSOR_STORE:-hxpr}
+      CONNECTOR_CURSOR_HXPR_PATH: ${CONNECTOR_CURSOR_HXPR_PATH:-/content-lake/_state/cursors}
+      CONNECTOR_CURSOR_FILE: ${CONNECTOR_CURSOR_FILE:-/var/lib/content-lake/connector/cursor.json}
       # Where a connector may persist state between runs, such as a change cursor or a delta token. The
       # host only provides somewhere writable and names it; a connector that needs state declares its own
       # setting in its ConnectorSchema and the operator points that setting at this path. Nothing reads
@@ -514,6 +578,50 @@ services:
     depends_on:
       hxpr-app:
         condition: service_healthy
+    networks:
+      - stack
+
+  mock-graph:
+    # Opt-in profile only, and test tooling rather than a product service. Combine with a base stack and
+    # the connector profile:
+    #   docker compose --profile alfresco --profile connector --profile sharepoint-mock up -d
+    #
+    # A stand-in for Microsoft Graph, so the SharePoint connector can be run without a Microsoft 365
+    # tenant. It exists because a tenant is not merely inconvenient to get: registering an application is
+    # disabled in this tenant, and a SharePoint site a developer is only a member of returns a truncated
+    # ACL, so it cannot validate permission mapping at all.
+    #
+    # It is deliberately unhelpful in the same places Graph is. It ignores $skip on children collections,
+    # answers /content with a 302 to a URL that rejects an Authorization header, answers 410 for a delta
+    # token it does not recognise, and reports Preference-Applied only for the preferences it was told to
+    # honour. A mock that were easier to talk to than the real service would let the connector encode the
+    # mock's shape and fail against the cloud.
+    #
+    # What it is not is an authentication server: msal4j rejects an authority that is not https, so a run
+    # against this uses SHAREPOINT_AUTH_MODE=static-token. It does check that a bearer token is present.
+    profiles: [sharepoint-mock]
+    image: content-lake-app/mock-graph:local
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile
+      target: mock-graph
+      additional_contexts:
+        code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
+    ports:
+      # Published so the fixtures can be inspected with curl while diagnosing a run.
+      - "${MOCK_GRAPH_PORT:-8099}:8099"
+    environment:
+      MOCK_GRAPH_PORT: 8099
+      MOCK_GRAPH_FIXTURES: /fixtures
+      MOCK_GRAPH_PAGE_SIZE: ${MOCK_GRAPH_PAGE_SIZE:-200}
+      # Empty stands for a tenant that honours no Prefer header, which is the deployment that cannot get
+      # Sites.FullControl.All. That is the difference between about one resource unit per document and six,
+      # so both answers have to be reachable from configuration.
+      MOCK_GRAPH_HONOURED_PREFERENCES: ${MOCK_GRAPH_HONOURED_PREFERENCES:-hierarchicalsharing,deltashowremovedasdeleted}
+      # Refuse every Nth request with 429 and a Retry-After, to exercise the connector's pause-and-resume.
+      # Zero never throttles.
+      MOCK_GRAPH_THROTTLE_EVERY: ${MOCK_GRAPH_THROTTLE_EVERY:-0}
+      MOCK_GRAPH_RETRY_AFTER_SECONDS: ${MOCK_GRAPH_RETRY_AFTER_SECONDS:-1}
     networks:
       - stack
 

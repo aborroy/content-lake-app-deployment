@@ -76,12 +76,15 @@ token and expect you to hold it, and discarding it on restart means re-enumerati
 The host only provides the directory and names it. **Nothing reads `CONNECTOR_STATE_DIRECTORY` on its
 own:** a connector that needs state declares its own setting in its `ConnectorSchema`, reads it through
 `ConnectorContext`, and the operator points that setting at this path. So for a connector declaring
-`sharepoint.state-directory`:
+`my-source.state-directory`:
 
 ```bash
-SHAREPOINT_STATE_DIRECTORY=/var/lib/content-lake/connector \
+MY_SOURCE_STATE_DIRECTORY=/var/lib/content-lake/connector \
   docker compose --profile alfresco --profile connector up -d connector-batch-ingester
 ```
+
+Not every connector needs it. The shipped SharePoint connector keeps its delta cursor through the host's own
+`CONNECTOR_CURSOR_STORE`, which defaults to a state document in hxpr and so needs no writable mount at all.
 
 Two things to know.
 
@@ -96,3 +99,50 @@ normal and fall back to a full enumeration; it is the state you will be in after
 
 Only `connector-batch-ingester` gets the mount. A jar is loaded by all six ingesters, but this is the only
 one that ingests from the registry, so it is the only one with state to keep.
+
+## The shipped connectors
+
+Two jars are built from `../content-lake-app/plugins/` rather than written for one deployment. Their settings
+arrive as environment variables like any other, using the names their schemas declare.
+
+| Connector | Jar | Settings |
+|---|---|---|
+| CMIS 1.1 | `cmis-connector-1.0.0.jar` | `CMIS_URL`, `CMIS_USERNAME`, `CMIS_PASSWORD`, `CMIS_ROOT_PATH`, ... |
+| SharePoint Online | `sharepoint-connector-1.0.0.jar` | `SHAREPOINT_DRIVE_IDS`, `SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, `SHAREPOINT_CLIENT_SECRET`, ... |
+
+Both are declared with defaults in the `connector-batch-ingester` block of `compose.content-lake.yaml`, where
+each setting carries a comment about what it does. The full tables are in
+`../content-lake-app/docs/configuration.md`.
+
+### Running the platform with every connector mounted
+
+The deployment is meant to run with all connector jars present or none, and an unconfigured connector is
+designed to decline rather than break anything. What that looks like:
+
+- Each mounted jar's schema is validated against the environment, and one missing a required setting is
+  **refused**: an error line naming the settings, that jar skipped, the application and the other jars
+  unaffected. So an all-connectors deployment logs one error per unconfigured connector by design.
+- With more than one connector configured, `CONNECTOR_SOURCE_TYPE` has to name the one to ingest with.
+- No connector does network I/O while being constructed, so mounting a jar cannot slow or break a deployment
+  that is using a different one.
+
+### SharePoint without a Microsoft 365 tenant
+
+`SHAREPOINT_GRAPH_BASE_URL` and `SHAREPOINT_AUTH_MODE` are the only two things that differ between a tenant
+and the mock Graph service in the `sharepoint-mock` profile, which is what lets the connector be run and
+demonstrated with no account anywhere:
+
+```bash
+CONNECTOR_SOURCE_TYPE=sharepoint \
+SHAREPOINT_DRIVE_IDS='b!mock-drive-id' SHAREPOINT_CLIENT_ID=mock \
+SHAREPOINT_AUTH_MODE=static-token SHAREPOINT_ACCESS_TOKEN=mock-token \
+SHAREPOINT_GRAPH_BASE_URL=http://mock-graph:8099/v1.0 \
+SHAREPOINT_RESOURCE_UNITS_PER_MINUTE=0 \
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  docker compose --profile alfresco --profile connector --profile sharepoint-mock up -d
+```
+
+`static-token` is needed because msal4j refuses an authority that is not `https`, so the mock cannot stand in
+for Entra ID. That makes token acquisition the one part of the connector a local run does not exercise.
+`../test/test-sharepoint.sh` drives the whole thing, including an assertion that a document restricted to one
+user is not returned to anyone else.

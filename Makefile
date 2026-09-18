@@ -19,6 +19,20 @@
 #      `sample-directory.root-path` is SAMPLE_DIRECTORY_ROOT_PATH -- then POST /api/sync/configured.
 #      GET /api/connectors lists what loaded and anything that failed to;
 #      ../content-lake-app/plugins/examples has a working connector to build)
+#   Mock Microsoft Graph (opt-in): add the 'sharepoint-mock' profile alongside 'connector', e.g.
+#     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+#     CONNECTOR_SOURCE_TYPE=sharepoint SHAREPOINT_AUTH_MODE=static-token \
+#     SHAREPOINT_ACCESS_TOKEN=mock-token SHAREPOINT_CLIENT_ID=mock \
+#     SHAREPOINT_DRIVE_IDS='b!mock-drive-id' \
+#     SHAREPOINT_GRAPH_BASE_URL=http://mock-graph:8099/v1.0 \
+#     SHAREPOINT_RESOURCE_UNITS_PER_MINUTE=0 \
+#       docker compose --profile alfresco --profile connector --profile sharepoint-mock up -d
+#     (a stand-in for Microsoft Graph on :8099, so the SharePoint connector can be run without a
+#      Microsoft 365 tenant. Test tooling, not a product service. Needs the sharepoint-connector jar in
+#      ./connectors, and static-token auth because msal4j refuses any authority that is not https.
+#      MOCK_GRAPH_HONOURED_PREFERENCES='' simulates a tenant without Sites.FullControl.All, and
+#      MOCK_GRAPH_THROTTLE_EVERY=3 makes it answer 429 with a Retry-After. ./test/test-sharepoint.sh
+#      drives all of it)
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)
@@ -187,14 +201,14 @@ verify-profiles: ## Assert every opt-in profile stays opt-in (no service leaks i
 	@fail=0; \
 	for profile in alfresco nuxeo full demo; do \
 	  services=$$($(DC) --profile $$profile config --services 2>/dev/null | sort | tr '\n' ' '); \
-	  for optin in otel-lgtm filesystem-batch-ingester connector-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md; do \
+	  for optin in otel-lgtm filesystem-batch-ingester connector-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md mock-graph; do \
 	    case " $$services " in \
 	      *" $$optin "*) echo "FAIL: $$optin is in the '$$profile' profile but should be opt-in only"; fail=1 ;; \
 	    esac; \
 	  done; \
 	  echo "ok: profile '$$profile' has no opt-in service"; \
 	done; \
-	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "connector:connector-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse"; do \
+	for pair in "observability:otel-lgtm" "filesystem:filesystem-batch-ingester" "connector:connector-batch-ingester" "debug:opensearch-dashboards" "transform-extras:transform-liteparse" "sharepoint-mock:mock-graph"; do \
 	  profile=$${pair%%:*}; service=$${pair##*:}; \
 	  services=$$($(DC) --profile demo --profile $$profile config --services 2>/dev/null | tr '\n' ' '); \
 	  case " $$services " in \
