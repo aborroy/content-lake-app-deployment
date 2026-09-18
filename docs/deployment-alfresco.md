@@ -162,7 +162,7 @@ default 0.10 trips on a single legitimate deletion:
 | `INGESTION_RECONCILE_MAX_SEEN_IDS` | `200000` | Bound on the node ids retained from discovery. Above it the sweep deletes nothing |
 | `INGESTION_RECONCILE_PAGE_SIZE` | `200` | Documents per page when scanning the index |
 
-The Nuxeo ingesters and the plugin host take the same five under `NUXEO_BATCH_RECONCILE_*` and
+The Nuxeo ingesters and the plugin runtime take the same five under `NUXEO_BATCH_RECONCILE_*` and
 `CONNECTOR_BATCH_RECONCILE_*`.
 
 Read the result off the job rather than inferring it from the index:

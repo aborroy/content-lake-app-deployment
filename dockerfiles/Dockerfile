@@ -40,7 +40,7 @@ COPY --from=code pom.xml .
 COPY --from=code common/pom.xml common/pom.xml
 COPY --from=code alfresco/pom.xml alfresco/pom.xml
 COPY --from=code nuxeo/pom.xml nuxeo/pom.xml
-COPY --from=code plugin-host/pom.xml plugin-host/pom.xml
+COPY --from=code plugin-runtime/pom.xml plugin-runtime/pom.xml
 
 # Leaf modules. All of them, for every image: Maven needs the full reactor to resolve any subset.
 COPY --from=code common/content-lake-repo-model/pom.xml common/content-lake-repo-model/pom.xml
@@ -53,7 +53,7 @@ COPY --from=code alfresco/alfresco-live-ingester/pom.xml alfresco/alfresco-live-
 COPY --from=code nuxeo/content-lake-source-nuxeo/pom.xml nuxeo/content-lake-source-nuxeo/pom.xml
 COPY --from=code nuxeo/nuxeo-batch-ingester/pom.xml nuxeo/nuxeo-batch-ingester/pom.xml
 COPY --from=code nuxeo/nuxeo-live-ingester/pom.xml nuxeo/nuxeo-live-ingester/pom.xml
-COPY --from=code plugin-host/plugin-batch-ingester/pom.xml plugin-host/plugin-batch-ingester/pom.xml
+COPY --from=code plugin-runtime/plugin-batch-ingester/pom.xml plugin-runtime/plugin-batch-ingester/pom.xml
 
 # Nothing under plugins/ belongs here. Those projects are outside the reactor on purpose: a connector
 # ships as a jar dropped into ./connectors at runtime, not as a module of this build.
@@ -213,14 +213,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 ############################################################
 FROM poms AS build-plugin-batch-ingester
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl plugin-host/plugin-batch-ingester -am dependency:go-offline
+    mvn -q -DskipTests -pl plugin-runtime/plugin-batch-ingester -am dependency:go-offline
 COPY --from=code common/content-lake-spi/src common/content-lake-spi/src
 COPY --from=code common/content-lake-core/src common/content-lake-core/src
-COPY --from=code plugin-host/plugin-batch-ingester/src plugin-host/plugin-batch-ingester/src
+COPY --from=code plugin-runtime/plugin-batch-ingester/src plugin-runtime/plugin-batch-ingester/src
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -DskipTests -pl plugin-host/plugin-batch-ingester -am package
+    mvn -q -DskipTests -pl plugin-runtime/plugin-batch-ingester -am package
 RUN mkdir -p /layers \
- && JAR="$(ls -1 plugin-host/plugin-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
+ && JAR="$(ls -1 plugin-runtime/plugin-batch-ingester/target/*.jar | grep -v 'original' | head -n 1)" \
  && java -Djarmode=layertools -jar "${JAR}" extract --destination /layers
 
 FROM runtime-base AS plugin-batch-ingester
