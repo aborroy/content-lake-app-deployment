@@ -172,6 +172,33 @@ services:
       # discoverability is part of what it shows, and the ACL suite asserts it. A deployment that
       # wants administrators subject to document ACLs sets this to false.
       RAG_SECURITY_ADMIN_BYPASS_ENABLED: ${RAG_SECURITY_ADMIN_BYPASS_ENABLED:-true}
+      # Entra ID group membership on the query path, which is what makes a SharePoint document granted to a
+      # group retrievable by its members. Off by default, and a deployment with no Graph source should leave
+      # it off: a resolver that exists and cannot reach its directory is worse than none, because
+      # RAG_SECURITY_GROUP_RESOLUTION_FAILURE then costs a caller the whole source on every query, where no
+      # resolver merely leaves group-granted documents invisible.
+      #
+      # Credentials are configured separately from the connector's on purpose. The connector's Graph client
+      # lives inside a shaded plugin jar this service never loads, and its resource-unit meter and
+      # tenant-wide throttle pause are built for a crawl; this makes one call per user per cache window. The
+      # cost of that choice is two credentials to keep in step.
+      RAG_SECURITY_ENTRA_ENABLED: ${RAG_SECURITY_ENTRA_ENABLED:-false}
+      RAG_SECURITY_ENTRA_TENANT_ID: ${RAG_SECURITY_ENTRA_TENANT_ID:-}
+      RAG_SECURITY_ENTRA_CLIENT_ID: ${RAG_SECURITY_ENTRA_CLIENT_ID:-}
+      RAG_SECURITY_ENTRA_CLIENT_SECRET: ${RAG_SECURITY_ENTRA_CLIENT_SECRET:-}
+      RAG_SECURITY_ENTRA_CERTIFICATE_PATH: ${RAG_SECURITY_ENTRA_CERTIFICATE_PATH:-}
+      RAG_SECURITY_ENTRA_CERTIFICATE_PASSWORD: ${RAG_SECURITY_ENTRA_CERTIFICATE_PASSWORD:-}
+      # client-credentials, or static-token for a run against the mock Graph service.
+      RAG_SECURITY_ENTRA_AUTH_MODE: ${RAG_SECURITY_ENTRA_AUTH_MODE:-client-credentials}
+      RAG_SECURITY_ENTRA_ACCESS_TOKEN: ${RAG_SECURITY_ENTRA_ACCESS_TOKEN:-}
+      RAG_SECURITY_ENTRA_GRAPH_BASE_URL: ${RAG_SECURITY_ENTRA_GRAPH_BASE_URL:-}
+      # The source type whose group principals this resolves, matching the connector's cin_sourceId prefix.
+      RAG_SECURITY_ENTRA_SOURCE_TYPE: ${RAG_SECURITY_ENTRA_SOURCE_TYPE:-sharepoint}
+      # A caller authenticates against Alfresco or Nuxeo, so their username is not necessarily their Entra
+      # identity. This appends a domain to a bare username, which covers one tenant whose UPNs are
+      # <username>@<domain>. Anything more elaborate is an identity-mapping problem this does not solve; an
+      # unknown identity is a 404, which costs the caller only this source's group grants.
+      RAG_SECURITY_ENTRA_USERNAME_SUFFIX: ${RAG_SECURITY_ENTRA_USERNAME_SUFFIX:-}
       # Accounts allowed to read every submitter's feedback (GET /api/rag/feedback?scope=all). Everyone
       # else reads only their own ratings. The application default is empty; this stack names the two
       # repository admin accounts so `cleval feedback import`, which needs the whole corpus, works

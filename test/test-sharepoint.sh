@@ -63,6 +63,15 @@ else
   BASE="http://${HOST}"; CURL_OPTS=""
 fi
 RAG_URL="${BASE}/api/rag"
+ALF_BASE="${BASE}/alfresco/api/-default-/public/alfresco/versions/1"
+ALF_AUTH="${ALF_AUTH:-admin:admin}"
+# Two callers for the group assertion. They authenticate against Alfresco, because that is what the RAG
+# service authenticates against; the mock's directory then answers for <username>@contoso.com, which is
+# also what exercises the resolver's username-suffix mapping.
+# Fixed, because the mock's directory fixtures are keyed by name. Distinctive, so they cannot
+# collide with the user-a and user-b that test-alfresco.sh creates on the same stack.
+MEMBER_USER="sp-member"
+NON_MEMBER_USER="sp-outsider"
 # Neither service is behind the proxy: both are opt-in, so no base deployment routes them.
 INGESTER="http://${HOST}:9096"
 MOCK="http://${HOST}:${MOCK_GRAPH_PORT:-8099}"
@@ -112,6 +121,17 @@ cleanup() {
   info "Removing the connector service, the mock and the jar"
   dc rm -sf connector-batch-ingester mock-graph >/dev/null 2>&1
   rm -f "connectors/${JAR_NAME}"
+  # The two callers are left in place. Alfresco's REST API answers 405 to DELETE /people/{id}, so there is
+  # no tidy way to remove them, and pretending to would leave a cleanup step that silently does nothing.
+  # Creating them again on the next run answers 409, which the suite treats as success.
+  # rag-service belongs to the base stack and this suite reconfigured it, so it is put back as it was.
+  # Without this, a stack left running would keep an Entra resolver pointed at a mock that is gone.
+  if [ "${RAG_RECONFIGURED:-false}" = "true" ]; then
+    info "Restoring rag-service without the Entra resolver"
+    ( unset RAG_SECURITY_ENTRA_ENABLED RAG_SECURITY_ENTRA_AUTH_MODE RAG_SECURITY_ENTRA_ACCESS_TOKEN \
+            RAG_SECURITY_ENTRA_GRAPH_BASE_URL RAG_SECURITY_ENTRA_USERNAME_SUFFIX
+      dc up -d --no-deps --force-recreate rag-service >/dev/null 2>&1 )
+  fi
 }
 trap cleanup EXIT
 
@@ -228,6 +248,57 @@ if [ "$(curl -s -o /dev/null -w '%{http_code}' "${MOCK}/v1.0/drives/${DRIVE_ID}"
   pass "S6: the mock refuses a request carrying no bearer token"
 else
   fail "S6: the mock served a drive to an unauthenticated caller"
+fi
+
+section "Two callers, and the Entra resolver on the query path"
+# They authenticate against Alfresco because that is what the RAG service authenticates against. The mock's
+# directory then answers for <username>@contoso.com, which also exercises the resolver's suffix mapping: a
+# caller's repository username is not necessarily their Entra identity.
+for user in "$MEMBER_USER" "$NON_MEMBER_USER"; do
+  code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X POST "${ALF_BASE}/people" \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"${user}\",\"firstName\":\"${user}\",\"email\":\"${user}@contoso.com\",\"password\":\"${user}-pw\"}")
+  case "$code" in
+    201) pass "S9b: created the Alfresco caller ${user}" ;;
+    409) pass "S9b: the Alfresco caller ${user} already exists" ;;
+    *)   fail "S9b: could not create ${user} (HTTP ${code})" ;;
+  esac
+done
+
+# rag-service belongs to the base stack, so this recreates it with the resolver on and puts it back in
+# cleanup. static-token because msal4j refuses an authority that is not https, so the mock cannot stand in
+# for Entra ID.
+export RAG_SECURITY_ENTRA_ENABLED=true
+export RAG_SECURITY_ENTRA_AUTH_MODE=static-token
+export RAG_SECURITY_ENTRA_ACCESS_TOKEN="mock-token-${RUN_TAG}"
+export RAG_SECURITY_ENTRA_GRAPH_BASE_URL="$MOCK_INTERNAL"
+export RAG_SECURITY_ENTRA_USERNAME_SUFFIX="@contoso.com"
+RAG_RECONFIGURED=true
+# Built, not just recreated: the resolver is new code, so a stack brought up before it existed is running an
+# image without the bean, and the group assertions would fail as "not retrievable" with no hint why. One
+# service with a warm cache, and it is the only way this suite tests the working tree rather than an image.
+if ! dc build rag-service; then
+  fail "S9c: the rag-service image did not build"
+  exit 1
+fi
+if ! dc up -d --no-deps --force-recreate rag-service >/dev/null 2>&1; then
+  fail "S9c: rag-service did not restart with the Entra resolver"
+  exit 1
+fi
+# 300s, matching run-tests.sh: a force-recreated rag-service boots a JVM and waits on its dependencies, and
+# 180s was measured here as not enough. The suite failed on the deadline, not on the service.
+elapsed=0; rag=""
+while [ $elapsed -lt 300 ]; do
+  rag=$(curl -s $CURL_OPTS -u "$RAG_AUTH" "${RAG_URL}/health" 2>/dev/null | jq -r '.status // "?"')
+  [ "$rag" = "UP" ] && break
+  sleep 5; elapsed=$((elapsed+5))
+done
+if [ "$rag" = "UP" ]; then
+  pass "S9c: rag-service is UP with the Entra resolver enabled (${elapsed}s)"
+else
+  fail "S9c: rag-service never became UP (last status ${rag})"
+  dc logs --tail 60 rag-service
+  exit 1
 fi
 
 section "Start connector-batch-ingester with the SharePoint connector"
@@ -378,10 +449,16 @@ section "ACL mapping"
 find_document "What is the named grant sentinel phrase?" "pangolin-ledger-named" \
   "named-grant.txt is NOT returned to a caller its ACL excludes" "S16" "$RAG_AUTH" "absent"
 
-# Granted to an Entra group only. Retrievable by nobody until a resolver expands group membership at query
-# time, and asserting that keeps the limitation a fact rather than a caveat in a document.
+# Granted to an Entra group only, which is how SharePoint is normally administered and therefore most of a
+# real corpus. This is the pair of assertions that says the ACL is actionable rather than merely recorded:
+# a member of that group retrieves it, and someone who is not does not. Before the resolver existed, the
+# honest assertion here was that it retrieved for nobody.
 find_document "What is the group grant sentinel phrase?" "pangolin-ledger-group" \
-  "group-grant.txt is returned to nobody, since nothing expands Entra groups yet" "S17" "$RAG_AUTH" "absent"
+  "group-grant.txt is retrievable by a member of the group it was granted to" "S17a" \
+  "${MEMBER_USER}:${MEMBER_USER}-pw"
+find_document "What is the group grant sentinel phrase?" "pangolin-ledger-group" \
+  "group-grant.txt is NOT retrievable by someone outside that group" "S17b" \
+  "${NON_MEMBER_USER}:${NON_MEMBER_USER}-pw" "absent"
 
 # The connector counts what it could not make retrievable. A number in a log is the only way an operator
 # learns that some documents are readable by no one. Its logger is java.util.logging, which Spring Boot
