@@ -69,6 +69,24 @@ name its own root container. Its sync API is guarded by one configured account, 
 [`connectors/README.md`](connectors/README.md) has the rest, including how a connector's own settings are
 passed in.
 
+`sharepoint-mock` is a second opt-in profile, layered on top of `connector`. It runs `mock-graph` on
+:8099, a stand-in for Microsoft Graph serving the SharePoint connector's own test fixtures, so that
+connector can be run and demonstrated with no Microsoft 365 tenant. Test tooling rather than a product
+service, and it is absent from all four base profiles, which `make verify-profiles` asserts.
+
+```bash
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+CONNECTOR_SOURCE_TYPE=sharepoint SHAREPOINT_DRIVE_IDS='b!mock-drive-id' \
+SHAREPOINT_CLIENT_ID=mock SHAREPOINT_AUTH_MODE=static-token SHAREPOINT_ACCESS_TOKEN=mock-token \
+SHAREPOINT_GRAPH_BASE_URL=http://mock-graph:8099/v1.0 SHAREPOINT_RESOURCE_UNITS_PER_MINUTE=0 \
+  docker compose --profile alfresco --profile connector --profile sharepoint-mock up -d
+```
+
+What it cannot stand in for is Entra ID: msal4j refuses an authority that is not `https`, so a mock run
+uses `static-token` and proves nothing about app-only token acquisition. It also cannot say whether a real
+tenant honours the `Prefer` headers, which is what `SHAREPOINT_PERMISSIONS_MODE=hierarchical` depends on.
+Both are covered by the connector's own unit tests against the real library, not here.
+
 For any profile that includes Nuxeo (`nuxeo`, `full`, `demo`), clone `nuxeo-deployment` as a sibling and start it first:
 
 ```bash
@@ -130,10 +148,23 @@ own setting and the operator points it at that path. See
 Note that the connector's own settings still have to reach the service. A plugin declares the property
 names it needs and reads them from the ingester's environment, so they are passed like any other setting.
 
-Two connectors come with the project. `../content-lake-app/plugins/cmis-connector` is a real source for
-any CMIS 1.1 repository, and `plugin-batch-ingester` already declares its `CMIS_*` settings, so it needs
-only the jar and the values. `../content-lake-app/plugins/examples/sample-directory-connector` is
-a hundred-line worked example to read before writing one.
+Three connectors ship with the project, and `plugin-batch-ingester` already declares the settings of all
+three, so each needs only its jar and its values:
+
+| Connector | Source | Notes |
+|---|---|---|
+| `plugins/cmis-connector` | any CMIS 1.1 repository | `CMIS_*` settings |
+| `plugins/sharepoint-connector` | SharePoint Online through Microsoft Graph | `SHAREPOINT_*` settings. Runs against the mock Graph service in the `sharepoint-mock` profile with no Microsoft 365 account at all |
+| `plugins/filesystem-connector` | a mounted directory | `FILESYSTEM_*` settings, in place of the retired `filesystem` profile |
+
+`../content-lake-app/plugins/examples/sample-directory-connector` is a hundred-line worked example to read
+before writing one, and is not a source anyone should deploy.
+
+SharePoint has one setting worth deciding before a first crawl. `SHAREPOINT_PERMISSIONS_MODE` defaults to
+`per-item`, measured at 5.60 Graph resource units per document, which bounds a crawl near 200,000 documents
+a day; `hierarchical` measures 1.10 but needs the `Sites.FullControl.All` application permission, and
+refuses to run rather than degrade without it. [`connectors/README.md`](connectors/README.md) has the
+figures and where they come from.
 
 ## Documentation
 
@@ -610,6 +641,38 @@ CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
 One case it deliberately does not cover, and says so in its own output: a repository reporting
 `capabilityACL=NONE`. Alfresco reports `manage`, so the fail-closed refusal and the `sync-account` and
 `public` fallbacks are unit-tested in the connector instead.
+
+## SharePoint Suite
+
+`test/test-sharepoint.sh` is the same shape again for the shipped SharePoint connector
+(`../content-lake-app/plugins/sharepoint-connector`), run against the `sharepoint-mock` profile rather than
+a tenant. The mock is the target by necessity, not convenience: registering an application is disabled in
+the tenant available here, and a SharePoint site a developer is only a member of returns a **truncated**
+ACL, so it cannot validate permission mapping at all. Exactly two things differ from the cloud, the Graph
+base URL and the token provider, and both are configuration.
+
+```bash
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  RAG_AUTH=admin:admin ./test/test-sharepoint.sh
+```
+
+Three passes over the same fixture tree: a walk, an incremental pass through the change feed that applies a
+tombstone, and a third in `hierarchical` permissions mode under a second source id. It also creates two
+Alfresco callers and switches `rag-service`'s Entra group resolver on, restoring it afterwards, because the
+assertions that matter are about whether an ACL is actionable rather than merely recorded:
+
+- a document granted to one named user is not retrievable by another, in either permissions mode;
+- a document granted only to an Entra group **is** retrievable by a member of that group and is not by
+  anyone else;
+- a `users`-scoped sharing link grants the named identities and nobody else;
+- the cost per document is reported in both permissions modes and compared, rather than estimated;
+- with the mock honouring no `Prefer` header, `hierarchical` mode refuses instead of silently paying the
+  per-item price.
+
+What no mock run can establish, and what still needs a tenant: real payload fidelity beyond the fixtures
+(written from Microsoft's documented shapes, not recorded), app-only token acquisition, genuine throttling
+behaviour, and whether SharePoint honours the `Prefer` headers at all. Do not read a green run as evidence
+of any of those four.
 
 ## Deploying to AWS EC2
 

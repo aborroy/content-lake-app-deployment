@@ -32,9 +32,10 @@
 #     (a stand-in for Microsoft Graph on :8099, so the SharePoint connector can be run without a
 #      Microsoft 365 tenant. Test tooling, not a product service. Needs the sharepoint-connector jar in
 #      ./connectors, and static-token auth because msal4j refuses any authority that is not https.
-#      MOCK_GRAPH_HONOURED_PREFERENCES='' simulates a tenant without Sites.FullControl.All, and
-#      MOCK_GRAPH_THROTTLE_EVERY=3 makes it answer 429 with a Retry-After. ./test/test-sharepoint.sh
-#      drives all of it)
+#      MOCK_GRAPH_HONOURED_PREFERENCES='' simulates a tenant without Sites.FullControl.All, which
+#      SHAREPOINT_PERMISSIONS_MODE=hierarchical then refuses to run against; ./test/test-sharepoint.sh
+#      drives both. MOCK_GRAPH_THROTTLE_EVERY=3 makes it answer 429 with a Retry-After, which the suite
+#      does not exercise: the connector's own GraphHttpClientTest covers the pause-and-resume)
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)

@@ -525,15 +525,25 @@ services:
       # map (emit GROUP_<objectId> faithfully) or skip (omit group principals, so a group-only item is
       # readable by nobody). Deliberately no option that widens a group grant to the whole tenant.
       #
-      # Either way, a document granted only to an Entra ID group is retrievable by nobody today: nothing
-      # expands Entra group membership at query time. Each run logs how many documents that affects.
+      # Either way, a document granted only to an Entra ID group is retrievable by nobody unless
+      # RAG_SECURITY_ENTRA_ENABLED is set on rag-service, which is what expands a caller's group membership
+      # at query time. Each run logs how many documents that affects.
       SHAREPOINT_GROUP_GRANTS: ${SHAREPOINT_GROUP_GRANTS:-map}
+      # per-item (the default) reads one 5-unit permissions collection per item, so a crawl costs about 6
+      # resource units per document and the daily cap binds near 200,000 documents. hierarchical reads them
+      # only where the sharing hierarchy says they are set, at roughly 1 unit per document.
+      #
+      # hierarchical needs the Sites.FullControl.All application permission, because that is what
+      # Prefer: hierarchicalsharing needs. The connector refuses to run rather than silently falling back if
+      # the tenant does not echo the preference: a fallback would quintuple the spend without saying so.
+      SHAREPOINT_PERMISSIONS_MODE: ${SHAREPOINT_PERMISSIONS_MODE:-per-item}
       # Display names meaning every user in the tenant, for a tenant that words "Everyone except external
       # users" differently. Empty uses the documented English names plus the spo-grid-all-users claim.
       SHAREPOINT_EVERYONE_CLAIMS: ${SHAREPOINT_EVERYONE_CLAIMS:-}
       # Below Graph's documented per-application per-tenant cap of 1250 units a minute, because that cap
       # is shared by everything using the same app registration. Permissions cost 5 units per item, so a
-      # crawl is about 6 units per document. Zero disables metering, which is only right against the mock.
+      # per-item crawl is about 6 units per document and a hierarchical one about 1. Zero disables metering,
+      # which is only right against the mock.
       SHAREPOINT_RESOURCE_UNITS_PER_MINUTE: ${SHAREPOINT_RESOURCE_UNITS_PER_MINUTE:-1000}
       SHAREPOINT_RESOURCE_UNIT_BURST: ${SHAREPOINT_RESOURCE_UNIT_BURST:-200}
       # Settings for the filesystem connector in ../content-lake-app/plugins/filesystem-connector, which

@@ -108,7 +108,7 @@ arrive as environment variables like any other, using the names their schemas de
 | Connector | Jar | Settings |
 |---|---|---|
 | CMIS 1.1 | `cmis-connector-1.0.0.jar` | `CMIS_URL`, `CMIS_USERNAME`, `CMIS_PASSWORD`, `CMIS_ROOT_PATH`, ... |
-| SharePoint Online | `sharepoint-connector-1.0.0.jar` | `SHAREPOINT_DRIVE_IDS`, `SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, `SHAREPOINT_CLIENT_SECRET`, ... |
+| SharePoint Online | `sharepoint-connector-1.0.0.jar` | `SHAREPOINT_DRIVE_IDS`, `SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, `SHAREPOINT_CLIENT_SECRET`, `SHAREPOINT_PERMISSIONS_MODE`, ... |
 
 Both are declared with defaults in the `plugin-batch-ingester` block of `compose.content-lake.yaml`, where
 each setting carries a comment about what it does. The full tables are in
@@ -146,3 +146,27 @@ CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
 for Entra ID. That makes token acquisition the one part of the connector a local run does not exercise.
 `../test/test-sharepoint.sh` drives the whole thing, including an assertion that a document restricted to one
 user is not returned to anyone else.
+
+### What a SharePoint crawl costs, and the one setting that changes it
+
+Graph meters SharePoint in resource units rather than requests, and charges **5 units for any permission
+operation** while refusing to let `permissions` be `$expand`ed onto an item. So the default
+`SHAREPOINT_PERMISSIONS_MODE=per-item` spends about 6 units per document, five of them on the ACL. Against a
+per-application per-tenant cap of 1,250 units a minute and 1.2M a day, that bounds a first crawl near
+**200,000 documents in 24 hours**.
+
+`SHAREPOINT_PERMISSIONS_MODE=hierarchical` reads permissions only where SharePoint's sharing hierarchy says
+they are set and inherits the rest, which moves the bottleneck to the content download where it belongs.
+Measured by `../test/test-sharepoint.sh` over the same fixture tree: **1.10 units per document against 5.60**,
+one permissions call serving nine items. The gap widens with the proportion of items that inherit and is
+bounded at sixfold, since the 1-unit content download is then the whole cost.
+
+Two things to know before turning it on:
+
+- It needs the **`Sites.FullControl.All`** application permission, because that is what
+  `Prefer: hierarchicalsharing` requires. Without it the connector **refuses to run** in this mode rather
+  than falling back, so a deployment that cannot get the grant stays on `per-item` deliberately rather than
+  paying five times the budget without being told.
+- The saving depends on how the tenant is administered. A tenant where users share individual files heavily
+  has more permission-hierarchy roots and less to inherit, so measure it rather than quoting the figure
+  above. Every pass logs its own `permissions mode ...` and `Graph resource units ... per document` lines.

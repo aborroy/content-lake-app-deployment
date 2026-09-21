@@ -8,9 +8,17 @@
 # protocol handling, real paging, real ACL mapping, real content downloads. Exactly two things differ from
 # the cloud, the Graph base URL and the token provider, and both are configuration.
 #
+# Three passes over the same fixture tree: a walk, an incremental one through the change feed, and a third
+# in hierarchical permissions mode under a second source id. The third is what measures the resource-unit
+# cost of the two permission modes against each other rather than estimating it, and it finishes by
+# reconfiguring the mock to honour no Prefer header at all, which the connector has to refuse rather than
+# silently pay the per-item price for.
+#
 # What this cannot prove, and what still needs a tenant: real payload fidelity beyond the fixtures, app-only
 # token acquisition (msal4j refuses an authority that is not https, so this run uses a static token),
-# genuine throttling behaviour, and whether SharePoint honours the Prefer headers.
+# genuine throttling behaviour, and whether SharePoint itself honours the Prefer headers. The mock's
+# willingness to honour one is configuration here and an administrator's grant of Sites.FullControl.All
+# there.
 #
 # Opt-in, and deliberately not a phase of run-tests.sh, for the same reasons as test-cmis.sh: the
 # connector profile is opt-in, and wiring it into every run would make the whole suite depend on a Maven
@@ -392,6 +400,9 @@ section "Retrieval"
 # a document a previous run left behind, and an absence assertion could fail for the same reason.
 find_document() {
   local query="$1" phrase="$2" label="$3" tid="$4" auth="${5:-$RAG_AUTH}" expect="${6:-found}"
+  # Which pass's copy of the document to look at. The hierarchical pass ingests the same fixtures under a
+  # second source id, so without this an assertion about it could be satisfied by the per-item pass's copy.
+  local source="${7:-$QUALIFIED_SOURCE}"
   local waited=0 resp hits deadline
   # Once a presence assertion has proved retrieval works, an absence needs no long deadline of its own.
   deadline=$([ "$expect" = "found" ] && echo "$POLL_DEADLINE_S" || echo 20)
@@ -399,7 +410,7 @@ find_document() {
     resp=$(curl $CURL_OPTS -sf -u "$auth" -X POST "${RAG_URL}/search/semantic" \
       -H 'Content-Type: application/json' \
       -d "{\"query\":\"${query}\",\"topK\":30,\"minScore\":0.2}" 2>/dev/null || echo '{}')
-    hits=$(echo "$resp" | jq --arg src "$QUALIFIED_SOURCE" --arg phrase "$phrase" \
+    hits=$(echo "$resp" | jq --arg src "$source" --arg phrase "$phrase" \
       '[.results[]? | select((.sourceDocument.sourceId // "") == $src)
                     | select((.chunkText // "") | test($phrase; "i"))] | length' 2>/dev/null || echo 0)
     if [ "${hits:-0}" -gt 0 ]; then
@@ -464,7 +475,7 @@ find_document "What is the group grant sentinel phrase?" "pangolin-ledger-group"
 # learns that some documents are readable by no one. Its logger is java.util.logging, which Spring Boot
 # bridges into the host's logging, so these lines appear in the service log like any other.
 acl_report=$(dc logs --tail 400 plugin-batch-ingester 2>/dev/null \
-  | grep -c "retrievable only by expanding an Entra group")
+  | grep -c "retrievable only where Entra group expansion is enabled")
 if [ "$acl_report" -gt 0 ]; then
   pass "S18: the run reports how many documents depend on an Entra group"
 else
@@ -512,6 +523,113 @@ fi
 
 find_document "What is the obsolete note sentinel phrase?" "pangolin-ledger-obsolete" \
   "obsolete-note.txt left the index after the feed reported it deleted" "S23" "$RAG_AUTH" "absent"
+
+# --- Third pass: the same tree with permissions resolved through the hierarchy ---------------------
+section "Third sync (hierarchical permissions mode)"
+# The same fixtures under a second source id, so the per-item documents stay in the index and every hit is
+# still attributable to the pass that made it. The ingester is force-recreated, which also resets the
+# resource-unit meter: the figures below are this pass's, not the previous two passes' totals.
+#
+# Reported per document at the tenth document rather than the first. At one document the cost is that
+# document plus the drive root's permissions, which reads the same in both modes.
+per_item_cost=$(dc logs --tail 600 plugin-batch-ingester 2>/dev/null \
+  | sed -n 's/.*in per-item permissions mode: spent .* over 10 document(s), \([0-9.]*\) per document.*/\1/p' \
+  | tail -1)
+export SHAREPOINT_PERMISSIONS_MODE=hierarchical
+export SHAREPOINT_SOURCE_ID="${SOURCE_ID}-h"
+QUALIFIED_SOURCE_HIER="${SOURCE_TYPE}:${SHAREPOINT_SOURCE_ID}"
+if ! dc up -d --no-deps --force-recreate plugin-batch-ingester >/dev/null 2>&1; then
+  fail "S24: the ingester did not restart in hierarchical permissions mode"
+else
+  elapsed=0; health=""
+  while [ $elapsed -lt 180 ]; do
+    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+    [ "$health" = "200" ] && break
+    sleep 5; elapsed=$((elapsed+5))
+  done
+  if [ "$health" != "200" ]; then
+    fail "S24: the ingester never became healthy in hierarchical mode (last HTTP ${health})"
+    dc logs --tail 80 plugin-batch-ingester
+  else
+    # The change feed is still enabled, but this container has no stored cursor for the new source id, so
+    # the pass walks. That is what exercises the hierarchy: a walk reaches a container before its children.
+    job3=$(curl -sf -u "$SYNC_AUTH" -X POST "${INGESTER}/api/sync/configured" 2>/dev/null || echo '{}')
+    job3_id=$(echo "$job3" | jq -r '.jobId // empty')
+    status3=$([ -n "$job3_id" ] && await_job "$job3_id" || echo "NOT_STARTED")
+    final3=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/sync/status/${job3_id}" 2>/dev/null || echo '{}')
+    synced3=$(echo "$final3" | jq -r '.syncedCount // 0')
+    if [ "$status3" = "COMPLETED" ] && [ "$synced3" -ge "$EXPECTED_DOCUMENTS" ]; then
+      pass "S24: hierarchical mode synced the same ${EXPECTED_DOCUMENTS} documents (synced=${synced3})"
+    else
+      fail "S24: hierarchical pass status=${status3} synced=${synced3}: $(echo "$final3" | jq -c .)"
+      dc logs --tail 80 plugin-batch-ingester
+    fi
+
+    # The point of the mode: most items are served an ancestor's ACL, so Graph is asked for far fewer
+    # permissions collections than there are items. grep -c and compare, never grep -q: under pipefail,
+    # grep -q closes the pipe on its first match, docker compose logs dies of SIGPIPE, and the check reports
+    # failure for something that succeeded.
+    hier_line=$(dc logs --tail 600 plugin-batch-ingester 2>/dev/null \
+      | grep "permissions mode hierarchical" | tail -1)
+    reads=$(echo "$hier_line" | sed -n 's/.*hierarchical, \([0-9]*\) permission call(s).*/\1/p')
+    inherited=$(echo "$hier_line" | sed -n 's/.*, \([0-9]*\) item(s) served an inherited ACL.*/\1/p')
+    if [ -n "${inherited:-}" ] && [ "$inherited" -gt 0 ] && [ "$reads" -lt "$inherited" ]; then
+      pass "S25: the hierarchy served ${inherited} item(s) from an ancestor for ${reads} permission call(s)"
+    else
+      fail "S25: no hierarchical resolution in the log (reads=${reads:-?} inherited=${inherited:-?})"
+    fi
+
+    # Measured in both modes over the same tree, which is what makes the cost claim a figure rather than an
+    # estimate. The connector's own PermissionHierarchyCacheTest measures the whole walk; this measures it
+    # through a real ingester against the mock.
+    hier_cost=$(dc logs --tail 600 plugin-batch-ingester 2>/dev/null \
+      | sed -n 's/.*in hierarchical permissions mode: spent .* over 10 document(s), \([0-9.]*\) per document.*/\1/p' \
+      | tail -1)
+    if [ -n "${per_item_cost:-}" ] && [ -n "${hier_cost:-}" ] \
+       && awk "BEGIN{exit !($hier_cost < $per_item_cost)}"; then
+      pass "S26: ${hier_cost} resource units per document, against ${per_item_cost} per item"
+    else
+      fail "S26: could not compare the cost per document (per-item=${per_item_cost:-?} hierarchical=${hier_cost:-?})"
+    fi
+
+    # The anchor the next assertion needs. Without a presence assertion against this pass's own source id,
+    # "not retrievable" below could simply mean the hierarchical pass never reached the index.
+    find_document "Which document was shared with an organisation wide link?" "pangolin-ledger-orgwide" \
+      "the hierarchical pass is in the index under its own source id" "S27a" \
+      "$RAG_AUTH" "found" "$QUALIFIED_SOURCE_HIER"
+
+    # The correctness risk in the whole optimisation, asserted rather than reasoned about: named-grant.txt is
+    # granted to Bob alone and sits under a folder the tenant may read, so a hierarchy that served it the
+    # folder's ACL would publish it. Matched on its own sentinel phrase and on this pass's source id, so it
+    # cannot pass on the per-item pass's copy of the same document.
+    find_document "What is the named grant sentinel phrase?" "pangolin-ledger-named" \
+      "named-grant.txt is NOT retrievable in hierarchical mode either" "S27b" \
+      "${MEMBER_USER}:${MEMBER_USER}-pw" "absent" "$QUALIFIED_SOURCE_HIER"
+
+    # A tenant that cannot grant Sites.FullControl.All. The connector has to refuse rather than quietly pay
+    # the per-item price, because a silent fallback multiplies a crawl's spend by about five.
+    section "A tenant that does not honour the preference"
+    ( export MOCK_GRAPH_HONOURED_PREFERENCES=""
+      dc up -d --no-deps --force-recreate mock-graph >/dev/null 2>&1 )
+    elapsed=0; code=000
+    while [ $elapsed -lt 60 ]; do
+      code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer probe" \
+        "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null || echo 000)
+      [ "$code" = "200" ] && break
+      sleep 3; elapsed=$((elapsed+3))
+    done
+    [ "$code" = "200" ] || warn "the mock did not come back after being reconfigured (HTTP ${code})"
+    job4=$(curl -sf -u "$SYNC_AUTH" -X POST "${INGESTER}/api/sync/configured" 2>/dev/null || echo '{}')
+    job4_id=$(echo "$job4" | jq -r '.jobId // empty')
+    [ -n "$job4_id" ] && await_job "$job4_id" >/dev/null
+    if [ "$(dc logs --tail 200 plugin-batch-ingester 2>/dev/null \
+            | grep -c 'did not apply')" -gt 0 ]; then
+      pass "S28: the connector refused hierarchical mode rather than degrading to per-item"
+    else
+      fail "S28: nothing in the log shows the unhonoured preference being refused"
+    fi
+  fi
+fi
 
 # --- Summary --------------------------------------------------------------------------------------
 printf "\n${B}Passed: %d | Failed: %d${N}\n" "$PASS" "$FAIL"
