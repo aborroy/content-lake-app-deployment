@@ -36,6 +36,26 @@
 #      SHAREPOINT_PERMISSIONS_MODE=hierarchical then refuses to run against; ./test/test-sharepoint.sh
 #      drives both. MOCK_GRAPH_THROTTLE_EVERY=3 makes it answer 429 with a Retry-After, which the suite
 #      does not exercise: the connector's own GraphHttpClientTest covers the pause-and-resume)
+#   SharePoint as a named user (no app registration with application permissions needed): sign in once on
+#   this host, then run the connector against the real tenant unattended.
+#     export SHAREPOINT_CLIENT_ID=<application (client) id of the public-client registration>
+#     export SHAREPOINT_TENANT_ID=<directory (tenant) id>
+#     ./scripts/sharepoint-device-login.sh
+#     CONNECTOR_SOURCE_TYPE=sharepoint SHAREPOINT_AUTH_MODE=device-code \
+#     SHAREPOINT_CLIENT_ID=$$SHAREPOINT_CLIENT_ID SHAREPOINT_TENANT_ID=$$SHAREPOINT_TENANT_ID \
+#     SHAREPOINT_DRIVE_IDS='<drive id>' \
+#     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+#       docker compose --profile alfresco --profile connector up -d
+#     (the sign-in prints a code and a URL, waits for a browser, and writes ./sharepoint-auth/msal-cache.json,
+#      which is bind-mounted read-only into the ingester. That file holds a refresh token: it is gitignored,
+#      chmod 600, and is a credential. The script exists because slf4j-api is `provided` for the plugin, so
+#      the jar cannot be run with `java -jar`.
+#      Two things to know before choosing this mode over client-credentials. It indexes one identity's view,
+#      so anything the signed-in user cannot read is absent from the index rather than present and
+#      unretrievable. And the mount is read-only, so refreshed tokens are held in memory and the sign-in has
+#      to be repeated when the stored refresh token finally expires, or after a password reset or a
+#      Conditional Access change. The connector reports the mode as unsupported for production at startup
+#      for that reason)
 #   OpenSearch Dashboards (opt-in): add the 'debug' profile to a base stack, e.g.
 #     docker compose --profile demo --profile debug up -d opensearch-dashboards
 #     (unauthenticated UI on :5601 over the cluster holding alfresco* and nuxeo_embeddings*)

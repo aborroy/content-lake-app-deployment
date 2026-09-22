@@ -500,16 +500,37 @@ services:
       SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:-}
       SHAREPOINT_TENANT_ID: ${SHAREPOINT_TENANT_ID:-}
       SHAREPOINT_AUTHORITY: ${SHAREPOINT_AUTHORITY:-}
-      # client-credentials is app-only and the only supported deployment mode. static-token exists for a
-      # run against the mock Graph service, and for validating ACL mapping against a developer's own
-      # OneDrive; the token it takes cannot be refreshed, so a restarted container cannot authenticate.
+      # Three modes.
+      #
+      # client-credentials is app-only, and is the right answer for an unattended crawl across a tenant. It
+      # needs an app registration carrying application permissions.
+      #
+      # device-code authenticates as a named person: a human signs in once on the host with
+      # scripts/sharepoint-device-login.sh, and the container refreshes silently from the token cache that
+      # produced. Use it where the tenant will not issue application permissions. Two consequences worth
+      # knowing before choosing it. It indexes that one identity's view, so content the signed-in user
+      # cannot read is absent from the index rather than present and unretrievable. And recovery from a
+      # revoked or finally-expired refresh token needs a human, which is why the connector reports this as
+      # not a supported production mode at startup.
+      #
+      # static-token exists for a run against the mock Graph service, and for validating ACL mapping against
+      # a developer's own OneDrive; the token it takes cannot be refreshed, so a restarted container cannot
+      # authenticate.
       SHAREPOINT_AUTH_MODE: ${SHAREPOINT_AUTH_MODE:-client-credentials}
       # Supply a secret or a certificate, never both. A certificate is preferred in a deployment because a
-      # secret expires on a date nobody diarises and takes the crawl down when it does.
+      # secret expires on a date nobody diarises and takes the crawl down when it does. Neither applies to
+      # device-code, which is a public client and holds no credential of its own.
       SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET:-}
       SHAREPOINT_CERTIFICATE_PATH: ${SHAREPOINT_CERTIFICATE_PATH:-}
       SHAREPOINT_CERTIFICATE_PASSWORD: ${SHAREPOINT_CERTIFICATE_PASSWORD:-}
       SHAREPOINT_ACCESS_TOKEN: ${SHAREPOINT_ACCESS_TOKEN:-}
+      # Where device-code reads its refresh token. The container path of the read-only mount below.
+      SHAREPOINT_TOKEN_CACHE_PATH: ${SHAREPOINT_TOKEN_CACHE_PATH:-/var/lib/content-lake/sharepoint-auth/msal-cache.json}
+      # Delegated scopes for device-code, comma separated. Empty asks for Sites.Read.All plus offline_access,
+      # which is the least-privileged pair measured to serve enumeration, per-item permission reads and
+      # content download. Ignored by the other two modes: an app-only token is scoped by the permissions
+      # granted to the registration, and Entra rejects resource scopes in a client-credentials request.
+      SHAREPOINT_SCOPES: ${SHAREPOINT_SCOPES:-}
       # Point this at the mock Graph service to run without a tenant:
       #   SHAREPOINT_GRAPH_BASE_URL=http://mock-graph:8099/v1.0
       SHAREPOINT_GRAPH_BASE_URL: ${SHAREPOINT_GRAPH_BASE_URL:-}
@@ -624,6 +645,21 @@ services:
       # an empty index" rule wants. A bind mount would survive `make clean` and reintroduce exactly the
       # stale-state problem that rule exists to prevent.
       - connector-state-data:/var/lib/content-lake/connector
+      # The delegated token cache for SHAREPOINT_AUTH_MODE=device-code, populated on the host by
+      # scripts/sharepoint-device-login.sh. Ignored by every other auth mode and by every other connector.
+      #
+      # A host bind mount rather than a named volume, which is the opposite of the choice made just above,
+      # and deliberately so. `make clean` removes every named volume, and the two costs are not comparable:
+      # wiping a change cursor costs a re-walk, where wiping a refresh token costs a human sitting at a
+      # browser before every end-to-end run. This is a credential a person minted, not state of the index
+      # being wiped alongside it.
+      #
+      # Read-only, so a compromised container can neither corrupt the file nor exfiltrate a rotated
+      # credential, and so no host-side ownership change is needed for the unprivileged user the image runs
+      # as. Entra issues a new refresh token on each redemption but keeps the previous one valid for its own
+      # lifetime, so the connector holds rotations in memory and says so once. When the original finally
+      # expires, sign in again.
+      - "${SHAREPOINT_TOKEN_CACHE_HOST_PATH:-./sharepoint-auth}:/var/lib/content-lake/sharepoint-auth:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -147,6 +147,41 @@ for Entra ID. That makes token acquisition the one part of the connector a local
 `../test/test-sharepoint.sh` drives the whole thing, including an assertion that a document restricted to one
 user is not returned to anyone else.
 
+### SharePoint as a named user, with no application permissions
+
+Where the tenant will issue a public-client app registration but not application permissions, the connector
+can authenticate as a person. Sign in once on the host, then the ingester refreshes silently and survives
+restarts:
+
+```bash
+export SHAREPOINT_CLIENT_ID='<application (client) id>'
+export SHAREPOINT_TENANT_ID='<directory (tenant) id>'
+../scripts/sharepoint-device-login.sh
+
+CONNECTOR_SOURCE_TYPE=sharepoint SHAREPOINT_AUTH_MODE=device-code \
+SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID" SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID" \
+SHAREPOINT_DRIVE_IDS='<drive id>' \
+CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
+  docker compose --profile alfresco --profile connector up -d
+```
+
+The sign-in writes `../sharepoint-auth/msal-cache.json`, which is bind-mounted read-only into the ingester.
+That file holds a refresh token, so it is gitignored, kept owner-readable only, and is a credential rather
+than configuration. There is a wrapper script rather than a `java -jar` because `slf4j-api` is `provided` for
+the plugin, so the jar cannot run on its own.
+
+Three consequences of choosing this over `client-credentials`, none of them obvious from the setting name:
+
+- The index holds **one identity's view**. Content the signed-in user cannot read is absent from it, rather
+  than present and unretrievable. That is a completeness limitation, not a security one.
+- The mount is read-only, so refreshed tokens live in memory for the life of the process. Nothing breaks; the
+  sign-in simply has to be repeated when the stored refresh token finally expires, or after a password reset
+  or a Conditional Access change.
+- The connector reports the mode as unsupported for production at startup, because recovery needs a human.
+
+An empty or spent cache is reported as a configuration problem naming the sign-in command, at load rather than
+mid-crawl. Nothing in the container can complete an interactive sign-in, and it deliberately does not try.
+
 ### What a SharePoint crawl costs, and the one setting that changes it
 
 Graph meters SharePoint in resource units rather than requests, and charges **5 units for any permission

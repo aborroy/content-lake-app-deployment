@@ -1,0 +1,7 @@
+# The delegated SharePoint token cache is written into this directory by
+# scripts/sharepoint-device-login.sh, and mounted read-only into plugin-batch-ingester at
+# /var/lib/content-lake/sharepoint-auth.
+#
+# The directory is tracked so the bind mount has something to mount on a fresh checkout. Its contents are
+# not, and must not be: the cache holds a refresh token, which outlives the access tokens it mints and can be
+# redeemed from anywhere.

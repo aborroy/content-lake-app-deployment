@@ -11,6 +11,13 @@ compose.override.yml
 # Drop directory mounted by the opt-in filesystem profile (FILESYSTEM_HOST_PATH)
 filesystem-data/
 
+# Delegated SharePoint token cache, written by scripts/sharepoint-device-login.sh and mounted read-only into
+# plugin-batch-ingester. It holds a refresh token, which outlives the access tokens it mints and can be
+# redeemed from anywhere, so it is a credential and never belongs in a commit. The directory's .gitkeep stays
+# tracked so the bind mount has something to mount on a fresh checkout.
+sharepoint-auth/*
+!sharepoint-auth/.gitkeep
+
 # macOS
 .DS_Store
 
