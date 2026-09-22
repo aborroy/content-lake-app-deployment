@@ -342,12 +342,19 @@ else
 fi
 
 schema=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/connectors/schema" 2>/dev/null || echo '[]')
-drives_required=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.drive-ids") | .required] | first // false')
+# drive-ids is deliberately NOT required since content-lake-app#157: a site can be named instead, and
+# ConnectorSchema cannot express "exactly one of drive-ids, site-url or site-id". That check moved into the
+# plugin's settingsFrom, so what the schema must publish is the three alternatives and the secrets.
+drives_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.drive-ids")] | length')
+site_url_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.site-url")] | length')
+folder_paths_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.folder-paths")] | length')
 secret_marked=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.client-secret") | .secret] | first // false')
-if [ "$drives_required" = "true" ] && [ "$secret_marked" = "true" ]; then
-  pass "S9: the schema publishes sharepoint.drive-ids as required and sharepoint.client-secret as secret"
+cache_marked=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.token-cache-path") | .secret] | first // false')
+if [ "$drives_present" = "1" ] && [ "$site_url_present" = "1" ] && [ "$folder_paths_present" = "1" ] \
+   && [ "$secret_marked" = "true" ] && [ "$cache_marked" = "true" ]; then
+  pass "S9: the schema publishes the three ways to scope a run, and marks both credentials secret"
 else
-  fail "S9: drive-ids required=${drives_required}, client-secret secret=${secret_marked}"
+  fail "S9: drive-ids=${drives_present} site-url=${site_url_present} folder-paths=${folder_paths_present}, client-secret secret=${secret_marked}, token-cache-path secret=${cache_marked}"
 fi
 
 # --- First pass: a walk that seeds a cursor -------------------------------------------------------
