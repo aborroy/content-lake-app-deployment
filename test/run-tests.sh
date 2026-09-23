@@ -217,7 +217,13 @@ wait_for_url 'http://localhost:8081/nuxeo/api/v1/path/default-domain' \
 ok "Nuxeo is up"
 
 info "Waiting for HXPR / RAG health status = UP (up to 5 min) …"
-wait_rag_up "$BASE" 'admin:admin' 60 5 \
+# The Nuxeo credential, not the Alfresco one. /api/rag/health is open, but the probe sends credentials, and
+# sending a credential the service cannot authenticate is worse than sending none: the filter answers
+# {"error":"Authentication required"} and the probe can then only time out. With 'admin:admin' this phase
+# polled for the full five minutes, logged sixty 'Authentication failed for user admin' warnings, gave up, and
+# proceeded to pass its own first assertion immediately -- which is the shape that hides a real readiness
+# failure, because the alarming warning is already there on a green run.
+wait_rag_up "$BASE" 'Administrator:Administrator' 60 5 \
   || warn "RAG health never reached UP; proceeding anyway"
 ok "RAG service is UP"
 assert_local_build
