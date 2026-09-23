@@ -27,6 +27,11 @@
 #     CONNECTOR_SELECTION_STORE defaults to hxpr here. The application's own default is `none`, which
 #     answers 501 -- so an unconfigured deployment has the endpoint and no store behind it. A selection
 #     lives in the index, so `make clean` wipes it; a restart does not.
+#     To manage all of that from the demo UI's Sources screen, add CONNECTORS_URL=/api/connectors to the
+#     'demo' profile's environment. It is empty by default, which hides the screen and its nav entry: the
+#     connector profile is opt-in, so a demo stack without one has no host and a screen answering 502 is
+#     worse than an absent screen. Same-origin through the proxy, so the browser sends this origin's
+#     credential. The screen also needs CONNECTOR_SYNC_USERNAME/PASSWORD, which it prompts for.
 #     The filesystem source runs this way since content-lake-app#148, in place of its own profile:
 #       CONNECTOR_SOURCE_TYPE=filesystem FILESYSTEM_ROOT_PATH=/data/connector \
 #       CONNECTOR_HOST_PATH=./filesystem-data CONNECTOR_SYNC_USERNAME=admin \

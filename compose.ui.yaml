@@ -36,14 +36,21 @@ services:
       ALFRESCO_URL: ${PUBLIC_BASE_URL:-}
       NUXEO_URL: ${PUBLIC_BASE_URL:-}/nuxeo
       RAG_URL: ${PUBLIC_BASE_URL:-}/api/rag
-      # The loaded-connector listing, which lives on an ingester rather than on rag-service. Never set until
-      # now, which is why the connector table on the status screen has never been visible in the shipped stack.
+      # The plugin host, which serves the connector listing, the folder browse, the selection and sync. Empty
+      # by default, which turns the Sources screen and its nav entry off.
       #
-      # Same-origin through the proxy, not the host's published port, so the browser sends this origin's
-      # credential and needs no cross-origin configuration. It resolves to a 502 rather than a hang when the
-      # opt-in connector profile is absent, and the UI treats a configured-but-unreachable connector list the
-      # same way it treats an empty one.
-      CONNECTORS_URL: ${CONNECTORS_URL:-${PUBLIC_BASE_URL:-}/api/connectors}
+      # Off is the right default because the connector profile is opt-in: a demo stack without it has no host
+      # to talk to, and a screen that answers 502 is worse than one that is absent. A deployment running the
+      # connector profile sets this, and the Makefile header documents it alongside that profile's other
+      # variables.
+      #
+      # Deliberately `:-` with an empty default rather than `:-/api/connectors`. Giving it a real default made
+      # this impossible to switch off: `:-` substitutes when the variable is empty *or* unset, so
+      # CONNECTORS_URL= left the screen on, and every demo stack got it whether or not a connector was running.
+      #
+      # Same-origin through the proxy when it is set, not the host's published port, so the browser sends this
+      # origin's credential and needs no cross-origin configuration.
+      CONNECTORS_URL: ${CONNECTORS_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
