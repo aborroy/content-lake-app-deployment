@@ -148,6 +148,42 @@ for tool in docker curl jq unzip; do
 done
 [ -d "$CONNECTOR_DIR" ] || { echo "Connector not found at $CONNECTOR_DIR (set APP_SOURCE)"; exit 2; }
 
+# The base stack, checked here rather than discovered six minutes in. Without this the suite builds the jar,
+# builds and starts mock-graph, passes S1 to S6 and only then fails at S9b with "could not create sp-member
+# (HTTP 000)" -- an Alfresco-shaped error, for a stack that was never up. Cheap to ask, and the answer names
+# the fix.
+section "Preconditions"
+# Written out rather than looped over packed strings: both a URL and a credential contain colons, so any
+# delimiter-splitting version of this reports a mangled URL and a doubled status code, which is a worse
+# diagnostic than the one it replaced.
+require_serving() {
+  local what="$1" url="$2" auth="$3" code
+  # No `|| echo 000` here. curl writes %{http_code} itself even when it cannot connect -- it writes 000 --
+  # and then exits non-zero, so the usual idiom concatenates the two and reports "HTTP 000000". The
+  # substitution belongs on an empty result, not on a failed exit.
+  code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$auth" "$url" 2>/dev/null)
+  code="${code:-000}"
+  if [ "$code" = "200" ]; then
+    info "${what} is serving"
+    return 0
+  fi
+  echo "The base stack is not serving: ${what} answered HTTP ${code} at ${url}"
+  echo "Bring one up first and wait for every service to be healthy, then re-run:"
+  echo "    make clean && make up-alfresco"
+  echo "This suite is opt-in and layers on a running base stack; it does not start one."
+  exit 2
+}
+require_serving "rag-service" "${RAG_URL}/health" "$RAG_AUTH"
+require_serving "Alfresco" "${ALF_BASE}/nodes/-root-" "$ALF_AUTH"
+# Ingestion embeds, so a missing AI backend fails every retrieval assertion with no hint that the cause is
+# not the connector.
+if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:12434/ 2>/dev/null || echo 000)" = "000" ]; then
+  echo "Nothing is listening on :12434, so embedding will fail and every retrieval assertion with it."
+  echo "Enable Docker Model Runner, or run 'make start-ai' on a GPU host."
+  exit 2
+fi
+info "the AI backend on :12434 is reachable"
+
 # --- The jar --------------------------------------------------------------------------------------
 section "Connector jar"
 if [ "$BUILD_JAR" = "true" ] || [ ! -f "$BUILT_JAR" ]; then
@@ -634,6 +670,211 @@ else
       pass "S28: the connector refused hierarchical mode rather than degrading to per-item"
     else
       fail "S28: nothing in the log shows the unhonoured preference being refused"
+    fi
+  fi
+fi
+
+# --- Fourth pass: how an operator chooses what to sync --------------------------------------------
+# Everything above proves the connector ingests, maps ACLs and reads its feed. None of it touches how the
+# scope gets chosen, which is the whole of content-lake-app#157 to #161 and the only part an operator sees.
+#
+# One ingester recreate for the whole section, under a third source id so the index starts empty for it:
+# a selection narrows what a pass *walks*, it does not retract what an earlier pass already indexed, and
+# reconciliation is off by default. Asserting an absence against a source id that had already been walked in
+# full would be asserting nothing.
+#
+# The drive id is deliberately NOT configured here. The site URL alone has to resolve to its document
+# libraries, which is the whole point of #157: before it, a drive id had to be found out of band before the
+# connector could be configured at all.
+section "Fourth sync (site discovery, browse, and a chosen scope)"
+
+export SHAREPOINT_PERMISSIONS_MODE=per-item
+export SHAREPOINT_SITE_URL="https://contoso.sharepoint.com/sites/lake"
+export SHAREPOINT_DRIVE_IDS=""
+export SHAREPOINT_SOURCE_ID="${SOURCE_ID}-sel"
+QUALIFIED_SOURCE_SEL="${SOURCE_TYPE}:${SHAREPOINT_SOURCE_ID}"
+# So one entry in a folder listing is out of scope, which is what makes "returned rather than omitted"
+# falsifiable. A MIME exclude rather than a path exclude because the folder fixtures carry no
+# parentReference.path -- the same gap that makes path scope unenforceable on a delta pass -- so a path
+# pattern would match no folder at all and the assertion would be vacuous.
+export SHAREPOINT_EXCLUDE_MIME_TYPES="application/pdf"
+# S28 left the mock honouring nothing. Put it back, or the connector refuses to start in any mode that asks
+# for a preference and this whole section fails for an unrelated reason.
+unset MOCK_GRAPH_HONOURED_PREFERENCES
+dc up -d --no-deps --force-recreate mock-graph >/dev/null 2>&1
+elapsed=0; code=000
+while [ $elapsed -lt 60 ]; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer probe" \
+    "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null || echo 000)
+  [ "$code" = "200" ] && break
+  sleep 3; elapsed=$((elapsed+3))
+done
+[ "$code" = "200" ] || warn "the mock did not come back before the selection section (HTTP ${code})"
+
+if ! dc up -d --no-deps --force-recreate plugin-batch-ingester >/dev/null 2>&1; then
+  fail "S29: the ingester did not restart with a site URL and no drive id"
+else
+  elapsed=0; health=""
+  while [ $elapsed -lt 180 ]; do
+    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+    [ "$health" = "200" ] && break
+    sleep 5; elapsed=$((elapsed+5))
+  done
+  if [ "$health" != "200" ]; then
+    fail "S29: the ingester never became healthy with a site URL configured (last HTTP ${health})"
+    dc logs --tail 80 plugin-batch-ingester
+  else
+    # Resolution is lazy and memoised, so it happens on the first call that needs a drive rather than at
+    # startup -- deliberately, because a Graph lookup on the startup path turns a transient outage into a
+    # container that will not boot. /api/browse/roots is such a call.
+    roots=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/browse/roots" 2>/dev/null || echo '{}')
+    root_id=$(echo "$roots" | jq -r '.roots[0].nodeId // empty')
+    resolved_from=$(echo "$roots" | jq -r '.resolvedFrom // "?"')
+    if [ "$root_id" = "${DRIVE_ID}:root" ]; then
+      pass "S29: a site URL alone resolved to its document library (${root_id}), with no drive id configured"
+    else
+      fail "S29: the site did not resolve to the expected drive. roots=$(echo "$roots" | jq -c .)"
+      dc logs --tail 60 plugin-batch-ingester | grep -i 'site\|drive' | tail -10
+    fi
+
+    # Where the tree starts, and which layer of the precedence chain said so. With nothing selected yet it is
+    # the connector's own answer, and an operator looking at an unexpected root needs to be told which.
+    if [ "$resolved_from" = "connector" ] && \
+       [ "$(echo "$roots" | jq -r '.roots | length')" = "1" ] && \
+       [ "$(echo "$roots" | jq -r '.problems | length')" = "0" ]; then
+      pass "S30: browse with no parameters returns the roots, resolved from the connector"
+    else
+      fail "S30: resolvedFrom=${resolved_from} roots=$(echo "$roots" | jq -c '.roots | length') problems=$(echo "$roots" | jq -c '.problems')"
+    fi
+
+    # A container's children, one page, with the scope annotation on each. This is what a folder picker draws.
+    children=$(curl -sf -u "$SYNC_AUTH" \
+      "${INGESTER}/api/browse/children?nodeId=${DRIVE_ID}:root" 2>/dev/null || echo '{}')
+    folder_count=$(echo "$children" | jq -r '[.nodes[]? | select(.folder == true)] | length')
+    annotated=$(echo "$children" | jq -r '[.nodes[]? | select(has("inScope") and has("traversable"))] | length')
+    if [ "$folder_count" = "5" ] && [ "$annotated" = "$folder_count" ]; then
+      pass "S31: browsing a container returns its ${folder_count} children, each annotated with its scope"
+    else
+      fail "S31: folders=${folder_count} annotated=${annotated}: $(echo "$children" | jq -c '[.nodes[]?.name]')"
+    fi
+
+    # The load-bearing property of the endpoint, and the one most likely to be "tidied" away. A scope resolver
+    # descends into a folder an include pattern does not match, so that a matching descendant stays reachable.
+    # Filtering the tree by inScope would therefore hide a legal selection from the picker, and would show an
+    # empty tree to the operator trying to work out what their exclusion did. The PDF is excluded by MIME here,
+    # so it must come back marked, not omitted.
+    pdf=$(curl -sf -u "$SYNC_AUTH" \
+      "${INGESTER}/api/browse/children?nodeId=${DRIVE_ID}:f-public" 2>/dev/null || echo '{}')
+    pdf_node=$(echo "$pdf" | jq -c '[.nodes[]? | select(.name == "quarterly-report.pdf")] | first // {}')
+    # `has(...) and (... == false)` rather than `.inScope // "missing"`: jq's `//` falls through on `false`
+    # exactly as it does on `null`, so the shorter form reports a correctly-marked entry as a missing field and
+    # this assertion failed against behaviour that was right.
+    if [ "$(echo "$pdf_node" | jq -r 'has("inScope") and (.inScope == false)')" = "true" ]; then
+      pass "S32: an out-of-scope entry is returned and marked, not omitted from the listing"
+    else
+      fail "S32: the excluded entry is $(echo "$pdf_node" | jq -c .)"
+    fi
+
+    # --- A chosen scope, applied without a restart ------------------------------------------------
+    # f-orglink, because the assertions have to be unconfounded. It holds org-wide.txt, which an
+    # organisation-scoped link makes retrievable by any authenticated caller, so there is a presence anchor
+    # inside the selection. Choosing f-nested instead would have put the only in-selection document behind a
+    # users-scoped link, and "not retrievable" would then prove nothing about the selection.
+    SELECTED_ROOT="${DRIVE_ID}:f-orglink"
+    sel=$(curl -sf -u "$SYNC_AUTH" -X PUT "${INGESTER}/api/selection" \
+      -H 'Content-Type: application/json' \
+      -d "{\"rootNodeIds\":[\"${SELECTED_ROOT}\"]}" 2>/dev/null || echo '{}')
+    if [ "$(echo "$sel" | jq -r '.chosen // false')" = "true" ] \
+       && [ "$(echo "$sel" | jq -r '.rootNodeIds[0] // empty')" = "$SELECTED_ROOT" ]; then
+      pass "S33: a selection written through the API is recorded against this source"
+    else
+      fail "S33: the selection was not recorded: $(echo "$sel" | jq -c .)"
+    fi
+
+    # No restart between the write above and the read here. Roots used to be resolved once during bean
+    # construction and handed to the sync as an immutable list, which is exactly what #161 changed.
+    roots_after=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/browse/roots" 2>/dev/null || echo '{}')
+    if [ "$(echo "$roots_after" | jq -r '.resolvedFrom // "?"')" = "selection" ] \
+       && [ "$(echo "$roots_after" | jq -r '.roots[0].nodeId // empty')" = "$SELECTED_ROOT" ]; then
+      pass "S34: the tree re-roots on the selection with no restart"
+    else
+      fail "S34: roots after the write: $(echo "$roots_after" | jq -c .)"
+    fi
+
+    # Cleared here so the next assertion counts this pass's enumeration and not the browse calls above.
+    curl -s -X DELETE "${MOCK}/mock-diagnostics/requests" >/dev/null 2>&1
+
+    job5=$(curl -sf -u "$SYNC_AUTH" -X POST "${INGESTER}/api/sync/configured" 2>/dev/null || echo '{}')
+    job5_id=$(echo "$job5" | jq -r '.jobId // empty')
+    status5=$([ -n "$job5_id" ] && await_job "$job5_id" || echo "NOT_STARTED")
+    final5=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/sync/status/${job5_id}" 2>/dev/null || echo '{}')
+    synced5=$(echo "$final5" | jq -r '.syncedCount // 0')
+    failed5=$(echo "$final5" | jq -r '.failedCount // 0')
+    if [ "$status5" = "COMPLETED" ] && [ "$failed5" = "0" ] && [ "$synced5" -ge 1 ]; then
+      pass "S35: the scoped pass completed through a site-resolved drive (synced=${synced5})"
+    else
+      fail "S35: status=${status5} synced=${synced5} failed=${failed5}: $(echo "$final5" | jq -c .)"
+      dc logs --tail 60 plugin-batch-ingester
+    fi
+
+    # Measured from what the connector actually asked Graph, not inferred from a document count. The mock's
+    # own request log is the only place that distinguishes "did not index it" from "never looked at it", and
+    # the second is the claim: folder scope exists to avoid paying for the enumeration, not to filter after.
+    enum_selected=$(curl -sf "${MOCK}/mock-diagnostics/requests?contains=f-orglink/children" 2>/dev/null \
+      | jq -r '.count // -1')
+    enum_excluded=$(curl -sf "${MOCK}/mock-diagnostics/requests?contains=f-public/children" 2>/dev/null \
+      | jq -r '.count // -1')
+    if [ "$enum_selected" -ge 1 ] && [ "$enum_excluded" = "0" ]; then
+      pass "S36: the enumeration was bounded by the selection (${enum_selected} call(s) inside it, ${enum_excluded} outside)"
+    else
+      fail "S36: enumeration inside=${enum_selected} outside=${enum_excluded}, so the scope was not applied to the walk"
+    fi
+
+    # The presence anchor, inside the selection. Without it the absence below could mean the pass never ran.
+    find_document "Which document was shared with an organisation wide link?" "pangolin-ledger-orgwide" \
+      "a document inside the selection is in the index" "S37a" \
+      "$RAG_AUTH" "found" "$QUALIFIED_SOURCE_SEL"
+
+    # The absence, and the reason it is falsifiable: incident-log.md carries its own sentinel phrase, is not
+    # the PDF the MIME exclude removes, and lives under f-public which the selection leaves out. So the only
+    # thing that can keep it out of this source id is the selection. Matched on a run-wide tag instead, every
+    # readable fixture would satisfy it.
+    find_document "What is the incident log sentinel phrase?" "pangolin-ledger-incident" \
+      "a document outside the selection is NOT in the index" "S37b" \
+      "$RAG_AUTH" "absent" "$QUALIFIED_SOURCE_SEL"
+
+    # A selection an operator saved has to outlive the container, or it is a scope they have to re-enter after
+    # every restart. It lives in the index rather than in the container, which is what makes this true --
+    # `make clean` would still take it, along with the index it describes.
+    dc restart plugin-batch-ingester >/dev/null 2>&1
+    elapsed=0; health=""
+    while [ $elapsed -lt 180 ]; do
+      health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+      [ "$health" = "200" ] && break
+      sleep 5; elapsed=$((elapsed+5))
+    done
+    survived=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/selection" 2>/dev/null || echo '{}')
+    if [ "$(echo "$survived" | jq -r '.rootNodeIds[0] // empty')" = "$SELECTED_ROOT" ] \
+       && [ "$(echo "$survived" | jq -r '.chosen // false')" = "true" ]; then
+      pass "S38: the selection survived a container restart"
+    else
+      fail "S38: after a restart the selection is $(echo "$survived" | jq -c .)"
+    fi
+
+    # A feed pass with a selection in place. Note what is asserted and what is NOT: the feed is drive-wide by
+    # design, because a Graph delta response carries no parentReference.path, so a selection cannot narrow it
+    # and this suite must not claim it does. What has to hold is that the pass still reads the feed rather than
+    # silently walking, and that the walk-time scope it did apply is still the one that was chosen.
+    curl -s -X DELETE "${MOCK}/mock-diagnostics/requests" >/dev/null 2>&1
+    job6=$(curl -sf -u "$SYNC_AUTH" -X POST "${INGESTER}/api/sync/configured" 2>/dev/null || echo '{}')
+    job6_id=$(echo "$job6" | jq -r '.jobId // empty')
+    status6=$([ -n "$job6_id" ] && await_job "$job6_id" || echo "NOT_STARTED")
+    delta_calls=$(curl -sf "${MOCK}/mock-diagnostics/requests?contains=/root/delta" 2>/dev/null \
+      | jq -r '.count // -1')
+    if [ "$status6" = "COMPLETED" ] && [ "$delta_calls" -ge 1 ]; then
+      pass "S39: a pass with a selection in place still reads the change feed (${delta_calls} delta call(s))"
+    else
+      fail "S39: status=${status6} delta calls=${delta_calls}"
     fi
   fi
 fi

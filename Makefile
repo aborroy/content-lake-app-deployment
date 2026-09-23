@@ -48,7 +48,13 @@
 #      MOCK_GRAPH_HONOURED_PREFERENCES='' simulates a tenant without Sites.FullControl.All, which
 #      SHAREPOINT_PERMISSIONS_MODE=hierarchical then refuses to run against; ./test/test-sharepoint.sh
 #      drives both. MOCK_GRAPH_THROTTLE_EVERY=3 makes it answer 429 with a Retry-After, which the suite
-#      does not exercise: the connector's own GraphHttpClientTest covers the pause-and-resume)
+#      does not exercise: the connector's own GraphHttpClientTest covers the pause-and-resume.
+#      It also reports on itself, which is the quickest way to see what a connector actually asked for:
+#        curl -s localhost:8099/mock-diagnostics/requests | jq .
+#        curl -s 'localhost:8099/mock-diagnostics/requests?contains=f-public/children' | jq .count
+#        curl -sX DELETE localhost:8099/mock-diagnostics/requests      # reset, to measure one pass alone
+#      Outside /v1.0 and needing no bearer token, because it is not part of the surface being mocked, and
+#      asking is not itself recorded)
 #   SharePoint as a named user (no app registration with application permissions needed): sign in once on
 #   this host, then run the connector against the real tenant unattended.
 #     export SHAREPOINT_CLIENT_ID=<application (client) id of the public-client registration>
