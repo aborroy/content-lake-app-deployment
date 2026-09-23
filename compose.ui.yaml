@@ -36,6 +36,14 @@ services:
       ALFRESCO_URL: ${PUBLIC_BASE_URL:-}
       NUXEO_URL: ${PUBLIC_BASE_URL:-}/nuxeo
       RAG_URL: ${PUBLIC_BASE_URL:-}/api/rag
+      # The loaded-connector listing, which lives on an ingester rather than on rag-service. Never set until
+      # now, which is why the connector table on the status screen has never been visible in the shipped stack.
+      #
+      # Same-origin through the proxy, not the host's published port, so the browser sends this origin's
+      # credential and needs no cross-origin configuration. It resolves to a 502 rather than a hang when the
+      # opt-in connector profile is absent, and the UI treats a configured-but-unreachable connector list the
+      # same way it treats an empty one.
+      CONNECTORS_URL: ${CONNECTORS_URL:-${PUBLIC_BASE_URL:-}/api/connectors}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -61,6 +69,10 @@ services:
     environment:
       NGINX_SYNC_DEFAULT_BACKEND: ${NGINX_SYNC_DEFAULT_BACKEND:-batch-ingester:9090}
       NGINX_ROOT_DIRECTIVE: ${NGINX_ROOT_DIRECTIVE:-return 302 /aca/;}
+      # Which $arg_sourceType routes /api/sync to the plugin host. It is whatever the mounted connector jar
+      # declares, so the deployment has to say; the sentinel default is a value no real source type can equal,
+      # which keeps the map valid on a stack with no connector profile rather than emitting an empty map key.
+      NGINX_CONNECTOR_SOURCE_TYPE: ${CONNECTOR_SOURCE_TYPE:-__no_connector__}
       SERVER_NAME: ${SERVER_NAME:-localhost}
       USE_HTTPS: ${USE_HTTPS:-false}
     volumes:
@@ -71,7 +83,7 @@ services:
       - -c
       - |
           set -e
-          envsubst '$$NGINX_SYNC_DEFAULT_BACKEND $$NGINX_ROOT_DIRECTIVE $$SERVER_NAME' \
+          envsubst '$$NGINX_SYNC_DEFAULT_BACKEND $$NGINX_ROOT_DIRECTIVE $$NGINX_CONNECTOR_SOURCE_TYPE $$SERVER_NAME' \
             < /etc/nginx/conf-template/nginx.conf.template \
             > /tmp/nginx.conf.substituted
           if [ "$$USE_HTTPS" = "true" ] && [ -f /etc/nginx/certs/server.crt ]; then

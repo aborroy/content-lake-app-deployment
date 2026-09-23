@@ -14,6 +14,19 @@
 #      environment variables using the names its schema declares -- hyphens become underscores, so
 #      `sample-directory.root-path` is SAMPLE_DIRECTORY_ROOT_PATH -- then POST /api/sync/configured.
 #      GET /api/connectors lists what loaded and anything that failed to)
+#     Set CONNECTOR_SOURCE_TYPE even when the jar is the only one mounted: besides selecting the
+#     connector, it is what routes /api/sync through the proxy. The proxy picks a backend from the
+#     request's ?sourceType, and the entry for this host is rendered from that variable, because the
+#     source type a mounted jar declares is not knowable when the nginx config is written. Without it
+#     a sync request reaches the default backend, which is the Alfresco ingester.
+#     The operator endpoints are proxied same-origin on the base stack's port, not only on :9096 --
+#     /api/connectors, /api/browse, /api/selection, and /api/connector-status for the host's own
+#     last-run summary (/api/status stays rag-service's). :9096 remains published, so diagnosing a jar
+#     that did not load never depends on the proxy.
+#     Which roots a pass walks is readable and writable at /api/selection without a restart, because
+#     CONNECTOR_SELECTION_STORE defaults to hxpr here. The application's own default is `none`, which
+#     answers 501 -- so an unconfigured deployment has the endpoint and no store behind it. A selection
+#     lives in the index, so `make clean` wipes it; a restart does not.
 #     The filesystem source runs this way since content-lake-app#148, in place of its own profile:
 #       CONNECTOR_SOURCE_TYPE=filesystem FILESYSTEM_ROOT_PATH=/data/connector \
 #       CONNECTOR_HOST_PATH=./filesystem-data CONNECTOR_SYNC_USERNAME=admin \

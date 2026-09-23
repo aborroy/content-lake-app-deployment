@@ -22,12 +22,19 @@ http {
     resolver 127.0.0.11 ipv6=off valid=30s;
 
     # Route /api/sync to the appropriate batch-ingester.
+    #
+    # The plugin host's key cannot be hard-coded, because the source type it serves is whatever the mounted
+    # connector jar declares and that is unknown when this file is rendered. So the deployment states it:
+    # NGINX_CONNECTOR_SOURCE_TYPE carries CONNECTOR_SOURCE_TYPE, and falls back to a sentinel that no real
+    # source type can equal, which keeps the map syntactically valid when the connector profile is not in use.
+    # Do not also list a shipped connector's type literally here: nginx refuses to start on a duplicate map
+    # key, so `sharepoint` as both a literal and the variable's value would break every deployment.
     map $arg_sourceType $sync_backend {
         default    ${NGINX_SYNC_DEFAULT_BACKEND};
         ""         ${NGINX_SYNC_DEFAULT_BACKEND};
         alfresco   batch-ingester:9090;
         nuxeo      nuxeo-batch-ingester:9093;
-        filesystem filesystem-batch-ingester:9095;
+        ${NGINX_CONNECTOR_SOURCE_TYPE} plugin-batch-ingester:9096;
     }
 
     # ── HTTP server ─────────────────────────────────────────────────────────────
@@ -66,6 +73,10 @@ http {
         set $share_upstream          share:8080;
         set $content_app_upstream    content-app:8080;
         set $demo_ui_upstream        content-lake-app-ui:80;
+        # Opt-in service: a variable rather than a literal upstream so the resolver above looks it up per
+        # request. nginx therefore starts, and answers 502, on a stack without the connector profile, instead
+        # of refusing to boot on an unresolvable host name.
+        set $plugin_host_upstream    plugin-batch-ingester:9096;
 
         location ~ ^(/.*/service/api/solr/.*)$             { return 403; }
         location ~ ^(/.*/s/api/solr/.*)$                   { return 403; }
@@ -99,6 +110,43 @@ http {
         # Operational status snapshot (rag-service, authenticated).
         location /api/status {
             proxy_pass http://$rag_service_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # ── The plugin host's operator endpoints (opt-in `connector` profile) ───────
+        #
+        # Routed same-origin so a browser-based UI needs no cross-origin configuration, and so the credential
+        # it already sends to this origin is the one that arrives. The host's own port 9096 stays published:
+        # diagnosing a jar that did not load must not depend on the proxy being right.
+        #
+        # WWW-Authenticate is stripped on every one of these, as it already is on /api/status. Each ingester is
+        # default-deny, so an unauthenticated call answers 401 with a Basic challenge, and a browser that sees
+        # that header raises its own native password box over the application. Hiding it lets the UI handle the
+        # 401 itself. This is a precondition of the Sources screen, not a refinement of it.
+
+        # Loaded connectors and their published settings schema. Descriptors only, never values.
+        location /api/connectors {
+            proxy_pass http://$plugin_host_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # The connector's own last-run summary, which is a different document from rag-service's /api/status.
+        # Deliberately not mounted at /api/status: that path belongs to rag-service, the demo UI compares it by
+        # exact equality, and moving it would break the status screen and the UI's auth interceptor together.
+        location /api/connector-status {
+            proxy_pass http://$plugin_host_upstream/api/status;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # Folder tree for the picker: roots, one node, one page of children.
+        location /api/browse {
+            proxy_pass http://$plugin_host_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # Which roots the connector syncs. The one write path here, and its blast radius is scope only.
+        location /api/selection {
+            proxy_pass http://$plugin_host_upstream;
             proxy_hide_header WWW-Authenticate;
         }
 
@@ -202,6 +250,10 @@ http {
         set $share_upstream          share:8080;
         set $content_app_upstream    content-app:8080;
         set $demo_ui_upstream        content-lake-app-ui:80;
+        # Opt-in service: a variable rather than a literal upstream so the resolver above looks it up per
+        # request. nginx therefore starts, and answers 502, on a stack without the connector profile, instead
+        # of refusing to boot on an unresolvable host name.
+        set $plugin_host_upstream    plugin-batch-ingester:9096;
 
         location ~ ^(/.*/service/api/solr/.*)$             { return 403; }
         location ~ ^(/.*/s/api/solr/.*)$                   { return 403; }
@@ -235,6 +287,43 @@ http {
         # Operational status snapshot (rag-service, authenticated).
         location /api/status {
             proxy_pass http://$rag_service_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # ── The plugin host's operator endpoints (opt-in `connector` profile) ───────
+        #
+        # Routed same-origin so a browser-based UI needs no cross-origin configuration, and so the credential
+        # it already sends to this origin is the one that arrives. The host's own port 9096 stays published:
+        # diagnosing a jar that did not load must not depend on the proxy being right.
+        #
+        # WWW-Authenticate is stripped on every one of these, as it already is on /api/status. Each ingester is
+        # default-deny, so an unauthenticated call answers 401 with a Basic challenge, and a browser that sees
+        # that header raises its own native password box over the application. Hiding it lets the UI handle the
+        # 401 itself. This is a precondition of the Sources screen, not a refinement of it.
+
+        # Loaded connectors and their published settings schema. Descriptors only, never values.
+        location /api/connectors {
+            proxy_pass http://$plugin_host_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # The connector's own last-run summary, which is a different document from rag-service's /api/status.
+        # Deliberately not mounted at /api/status: that path belongs to rag-service, the demo UI compares it by
+        # exact equality, and moving it would break the status screen and the UI's auth interceptor together.
+        location /api/connector-status {
+            proxy_pass http://$plugin_host_upstream/api/status;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # Folder tree for the picker: roots, one node, one page of children.
+        location /api/browse {
+            proxy_pass http://$plugin_host_upstream;
+            proxy_hide_header WWW-Authenticate;
+        }
+
+        # Which roots the connector syncs. The one write path here, and its blast radius is scope only.
+        location /api/selection {
+            proxy_pass http://$plugin_host_upstream;
             proxy_hide_header WWW-Authenticate;
         }
 

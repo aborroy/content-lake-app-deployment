@@ -496,7 +496,24 @@ services:
       #
       # Node ids are '<driveId>:<itemId>', so CONNECTOR_ROOTS takes composite values. Leave it empty for a
       # single drive, which the connector can answer for itself.
+      #
+      # Three ways to say what to ingest, and the connector requires exactly one of the first two. Name the
+      # drives outright, or name the site and let the connector resolve its document libraries. The schema
+      # cannot express "exactly one of these", so the check lives in the plugin and a run with neither fails at
+      # startup naming the settings.
       SHAREPOINT_DRIVE_IDS: ${SHAREPOINT_DRIVE_IDS:-}
+      SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:-}
+      SHAREPOINT_SITE_ID: ${SHAREPOINT_SITE_ID:-}
+      # Narrows a resolved site to named libraries, for a site with more than one. Empty takes them all.
+      SHAREPOINT_DRIVE_NAMES: ${SHAREPOINT_DRIVE_NAMES:-}
+      # Scopes a pass to folders, which is not the same thing as filtering one: folder-paths resolves to item
+      # ids that become the walk's roots, so a child outside them is never enumerated and never paid for.
+      # include-paths below filters after the walk has already listed every child.
+      #
+      # It cannot be enforced on a change-feed pass, because a Graph delta response carries no
+      # parentReference.path. A deployment that needs path scope honoured on every pass has to leave the feed
+      # off.
+      SHAREPOINT_FOLDER_PATHS: ${SHAREPOINT_FOLDER_PATHS:-}
       SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:-}
       SHAREPOINT_TENANT_ID: ${SHAREPOINT_TENANT_ID:-}
       SHAREPOINT_AUTHORITY: ${SHAREPOINT_AUTHORITY:-}
@@ -625,6 +642,22 @@ services:
       CONNECTOR_CURSOR_STORE: ${CONNECTOR_CURSOR_STORE:-hxpr}
       CONNECTOR_CURSOR_HXPR_PATH: ${CONNECTOR_CURSOR_HXPR_PATH:-/content-lake/_state/cursors}
       CONNECTOR_CURSOR_FILE: ${CONNECTOR_CURSOR_FILE:-/var/lib/content-lake/connector/cursor.json}
+      # Where the roots an operator chose are kept, so changing a scope needs no restart. The application's
+      # own default is `none`, which makes the feature additive but also inert: with no store /api/selection
+      # answers 501 and /api/browse/roots can never resolve from a selection, so the folder picker has nothing
+      # to write to. This deployment opts in.
+      #
+      # hxpr for the same reason the cursor uses it: one state document per source, needing nothing the
+      # deployment does not already have. A separate hxpr folder from the cursors is deliberate, since both
+      # are keyed by the qualified source id and one folder would collide them.
+      #
+      # Note what that means for lifetime. A selection lives in the index, so `make clean` wipes it along with
+      # everything else; a container restart does not. "Survives a restart" and "survives make clean" are
+      # different claims and only the first is true. That is the opposite of the token cache below, which is a
+      # credential a human minted interactively and therefore gets a host bind mount instead.
+      CONNECTOR_SELECTION_STORE: ${CONNECTOR_SELECTION_STORE:-hxpr}
+      CONNECTOR_SELECTION_HXPR_PATH: ${CONNECTOR_SELECTION_HXPR_PATH:-/content-lake/_state/roots}
+      CONNECTOR_SELECTION_FILE: ${CONNECTOR_SELECTION_FILE:-/var/lib/content-lake/connector/roots.json}
       # Where a connector may persist state between runs, such as a change cursor or a delta token. The
       # host only provides somewhere writable and names it; a connector that needs state declares its own
       # setting in its ConnectorSchema and the operator points that setting at this path. Nothing reads
