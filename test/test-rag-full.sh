@@ -76,7 +76,7 @@ create_nuxeo_user() {
   local id="$1"
   local check_code payload code
   check_code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-    "$NUXEO_BASE/user/$id" 2>/dev/null || echo 000)
+    "$NUXEO_BASE/user/$id" 2>/dev/null )
   case "$check_code" in
     200)
       info "Nuxeo user $id already exists"
@@ -90,7 +90,7 @@ EOF
       code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
         "$NUXEO_BASE/user" \
         -H 'Content-Type: application/json' \
-        --data "$payload" 2>/dev/null || echo 000)
+        --data "$payload" 2>/dev/null )
       case "$code" in
         200|201) info "Created Nuxeo user $id" ;;
         409) info "Nuxeo user $id already exists" ;;
@@ -149,7 +149,7 @@ set_alfresco_read_access() {
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
     -d "{\"permissions\":{\"isInheritanceEnabled\":false,\"locallySet\":[{\"authorityId\":\"$user_id\",\"name\":\"Consumer\",\"accessStatus\":\"ALLOWED\"}]}}" \
-    2>/dev/null || echo 000)
+    2>/dev/null )
   [ "$code" = "200" ]
 }
 
@@ -169,7 +169,7 @@ EOF
   code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_BASE/automation/Document.AddPermission" \
     -H 'Content-Type: application/json' \
-    --data "$payload" 2>/dev/null || echo 000)
+    --data "$payload" 2>/dev/null )
   if [ "$code" != "200" ] && [ "$code" != "204" ]; then
     return 1
   fi
@@ -181,7 +181,7 @@ EOF
   code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_BASE/automation/Document.AddPermission" \
     -H 'Content-Type: application/json' \
-    --data "$payload" 2>/dev/null || echo 000)
+    --data "$payload" 2>/dev/null )
   [ "$code" = "200" ] || [ "$code" = "204" ]
 }
 
@@ -350,20 +350,21 @@ get_alfresco_ticket() {
 
 section "A — Smoke Tests"
 
-code=$(curl -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null || echo 000)
+code=$(curl -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null )
+code="${code:-000}"
 [ "$code" = "200" ] && pass "A1: RAG service /health is UP" || fail "A1: RAG service returned HTTP $code"
 
 code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-  "$ALF_BASE/nodes/-root-/children" 2>/dev/null || echo 000)
+  "$ALF_BASE/nodes/-root-/children" 2>/dev/null )
 [ "$code" = "200" ] && pass "A2: Alfresco repository responds" || fail "A2: Alfresco returned HTTP $code"
 
 code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-  "$NUXEO_BASE/path/default-domain" 2>/dev/null || echo 000)
+  "$NUXEO_BASE/path/default-domain" 2>/dev/null )
 [ "$code" = "200" ] && pass "A3: Nuxeo repository responds" || fail "A3: Nuxeo returned HTTP $code"
 
 unauth_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"unauthenticated","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
+  -d '{"query":"unauthenticated","topK":1,"minScore":0.2}' 2>/dev/null )
 [ "$unauth_code" = "401" ] \
   && pass "A4: Unauthenticated RAG request rejected with HTTP 401" \
   || fail "A4: Expected HTTP 401 for unauthenticated request, got HTTP $unauth_code"

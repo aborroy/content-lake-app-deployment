@@ -98,7 +98,8 @@ wait_for_url() {
   local i code
   for i in $(seq 1 "$max"); do
     # shellcheck disable=SC2086
-    code=$(curl -sf $CURL_TLS -o /dev/null -w '%{http_code}' "${curl_auth[@]}" "$url" 2>/dev/null || echo 000)
+    code=$(curl -sf $CURL_TLS -o /dev/null -w '%{http_code}' "${curl_auth[@]}" "$url" 2>/dev/null )
+    code="${code:-000}"
     if [ "$code" = "200" ]; then return 0; fi
     printf '.'
     sleep "$interval"

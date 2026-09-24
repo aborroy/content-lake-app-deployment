@@ -172,7 +172,7 @@ alf_update_content() {
   curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_API/nodes/$node_id/content" \
     -H 'Content-Type: text/plain' \
-    --data-binary "@$path" 2>/dev/null || echo 000
+    --data-binary "@$path" 2>/dev/null
 }
 
 # alf_sync_wait <folder_id> <tid_trigger> <tid_complete>
@@ -222,7 +222,7 @@ nux_should_delete_workspace() {
 nux_ensure_workspace() {
   local code
   code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-    "$NUXEO_API/path/default-domain/workspaces/${NUXEO_WORKSPACE}" 2>/dev/null || echo 000)
+    "$NUXEO_API/path/default-domain/workspaces/${NUXEO_WORKSPACE}" 2>/dev/null )
   if [ "$code" = "200" ]; then return 0; fi
   local payload
   payload=$(jq -n --arg name "$NUXEO_WORKSPACE" \
@@ -230,7 +230,7 @@ nux_ensure_workspace() {
   code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_API/path/default-domain/workspaces" \
     -H 'Content-Type: application/json' \
-    --data "$payload" 2>/dev/null || echo 000)
+    --data "$payload" 2>/dev/null )
   if [ "$code" = "201" ]; then
     NUX_WORKSPACE_CREATED=1
   fi
@@ -265,7 +265,7 @@ nux_create_doc() {
   attach_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_API/automation/Blob.AttachOnDocument" \
     -F "params=${params};type=application/json" \
-    -F "input=@${tmp_path};filename=smoke.txt;type=text/plain" 2>/dev/null || echo 000)
+    -F "input=@${tmp_path};filename=smoke.txt;type=text/plain" 2>/dev/null )
 
   [ "$attach_code" = "200" ] && printf '%s' "$uid" || echo ""
 }
@@ -286,7 +286,7 @@ ensure_shared_user() {
   local alf_code nux_code payload
 
   alf_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-    "$ALF_API/people/${SMOKE_USER}" 2>/dev/null || echo 000)
+    "$ALF_API/people/${SMOKE_USER}" 2>/dev/null )
   if [ "$alf_code" != "200" ]; then
     curl -s $CURL_OPTS -o /dev/null -u "$ALF_AUTH" -X POST "$ALF_API/people" \
       -H 'Content-Type: application/json' \
@@ -296,7 +296,7 @@ ensure_shared_user() {
   fi
 
   nux_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-    "$NUXEO_API/user/${SMOKE_USER}" 2>/dev/null || echo 000)
+    "$NUXEO_API/user/${SMOKE_USER}" 2>/dev/null )
   if [ "$nux_code" != "200" ]; then
     payload=$(jq -n \
       --arg id  "$SMOKE_USER" \
@@ -304,7 +304,7 @@ ensure_shared_user() {
       '{"entity-type":"user","id":$id,"properties":{"username":$id,"firstName":"Smoke","lastName":"Tester","password":$pw,"email":($id+"@smoke.local")}}')
     create_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST "$NUXEO_API/user" \
       -H 'Content-Type: application/json' \
-      --data "$payload" 2>/dev/null || echo 000)
+      --data "$payload" 2>/dev/null )
     if [ "$create_code" = "201" ] || [ "$create_code" = "200" ]; then
       NUX_USER_CREATED=1
     else
@@ -331,31 +331,32 @@ else
 fi
 
 code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-  "$ALF_API/nodes/-root-/children" 2>/dev/null || echo 000)
+  "$ALF_API/nodes/-root-/children" 2>/dev/null )
 [ "$code" = "200" ] \
   && pass "A2: Alfresco repository responds (HTTP 200)" \
   || fail "A2: Alfresco returned HTTP $code"
 
 code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-  "$NUXEO_API/path/default-domain" 2>/dev/null || echo 000)
+  "$NUXEO_API/path/default-domain" 2>/dev/null )
 [ "$code" = "200" ] \
   && pass "A3: Nuxeo repository responds (HTTP 200)" \
   || fail "A3: Nuxeo returned HTTP $code"
 
 code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"smoke","topK":1}' 2>/dev/null || echo 000)
+  -d '{"query":"smoke","topK":1}' 2>/dev/null )
 [ "$code" = "401" ] \
   && pass "A4: Unauthenticated RAG request rejected (HTTP 401)" \
   || fail "A4: Expected HTTP 401 for unauthenticated request, got HTTP $code"
 
 code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-  "$SYNC_URL/status" 2>/dev/null || echo 000)
+  "$SYNC_URL/status" 2>/dev/null )
 [ "$code" = "200" ] \
   && pass "A5: Sync API status endpoint healthy (HTTP 200)" \
   || fail "A5: Sync API status returned HTTP $code"
 
-code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' "$BASE/" 2>/dev/null || echo 000)
+code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' "$BASE/" 2>/dev/null )
+code="${code:-000}"
 [ "$code" = "200" ] \
   && pass "A6: Content Lake UI served (HTTP 200)" \
   || fail "A6: Content Lake UI returned HTTP $code (Angular app may not be running)"
@@ -716,7 +717,7 @@ section "F5 — Node Status"
 
 if [ -n "${ALF_NODE_ID:-}" ]; then
   resp=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-    "$BASE/api/content-lake/nodes/${ALF_NODE_ID}/status" 2>/dev/null || echo 000)
+    "$BASE/api/content-lake/nodes/${ALF_NODE_ID}/status" 2>/dev/null )
   if [ "$resp" = "200" ]; then
     status_body=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" \
       "$BASE/api/content-lake/nodes/${ALF_NODE_ID}/status" 2>/dev/null || echo '{}')
@@ -779,7 +780,7 @@ ALF_PERM_USER_CREATED=0
 
 # I0: Create the no-access user (used only to prove it cannot see restricted content)
 perm_check_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-  "$ALF_API/people/${ALF_PERM_USER}" 2>/dev/null || echo 000)
+  "$ALF_API/people/${ALF_PERM_USER}" 2>/dev/null )
 if [ "$perm_check_code" != "200" ]; then
   curl -s $CURL_OPTS -o /dev/null -u "$ALF_AUTH" -X POST "$ALF_API/people" \
     -H 'Content-Type: application/json' \
@@ -805,7 +806,7 @@ EOF
       "$ALF_API/nodes/$ALF_RESTRICTED_NODE_ID" \
       -H 'Content-Type: application/json' \
       -d "{\"permissions\":{\"isInheritanceEnabled\":false,\"locallySet\":[{\"authorityId\":\"${SMOKE_USER}\",\"name\":\"Consumer\",\"accessStatus\":\"ALLOWED\"}]}}" \
-      2>/dev/null || echo 000)
+      2>/dev/null )
     if [ "$acl_code" = "200" ]; then
       pass "I2: ACL set -- restricted to ${SMOKE_USER} only"
     else
@@ -946,13 +947,13 @@ fi
 # The v1 REST API returns 405 on Community Edition; fall back to the legacy Alfresco API.
 if [ "$ALF_USER_CREATED" = "1" ]; then
   code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-    "$ALF_API/people/${SMOKE_USER}" 2>/dev/null || echo 000)
+    "$ALF_API/people/${SMOKE_USER}" 2>/dev/null )
   if [ "$code" = "204" ]; then
     pass "G5: Alfresco smoke-tester user deleted"
   else
     # Legacy API works on Community Edition
     code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-      "${BASE}/alfresco/s/api/people/${SMOKE_USER}" 2>/dev/null || echo 000)
+      "${BASE}/alfresco/s/api/people/${SMOKE_USER}" 2>/dev/null )
     [ "$code" = "200" ] || [ "$code" = "204" ] \
       && pass "G5: Alfresco smoke-tester user deleted (legacy API)" \
       || fail "G5: Failed to delete Alfresco smoke-tester user (v1 HTTP 405, legacy HTTP $code)"
@@ -962,7 +963,7 @@ fi
 # Remove the Nuxeo smoke-tester user if this run created it.
 if [ "$NUX_USER_CREATED" = "1" ]; then
   code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X DELETE \
-    "$NUXEO_API/user/${SMOKE_USER}" 2>/dev/null || echo 000)
+    "$NUXEO_API/user/${SMOKE_USER}" 2>/dev/null )
   [ "$code" = "204" ] || [ "$code" = "200" ] \
     && pass "G6: Nuxeo smoke-tester user deleted" \
     || fail "G6: Failed to delete Nuxeo smoke-tester user (HTTP $code)"
@@ -977,7 +978,7 @@ if nux_should_delete_workspace; then
     2>/dev/null | jq -r '.uid // empty')
   if [ -n "$ws_uid" ]; then
     code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X DELETE \
-      "$NUXEO_API/id/${ws_uid}?hard=true" 2>/dev/null || echo 000)
+      "$NUXEO_API/id/${ws_uid}?hard=true" 2>/dev/null )
     [ "$code" = "204" ] || [ "$code" = "200" ] \
       && pass "G7: Nuxeo workspace '${NUXEO_WORKSPACE}' permanently deleted" \
       || fail "G7: Failed to delete Nuxeo workspace '${NUXEO_WORKSPACE}' (HTTP $code)"
@@ -1005,12 +1006,12 @@ fi
 # G11: Permission-check user (only if created by this run)
 if [ "${ALF_PERM_USER_CREATED:-0}" = "1" ]; then
   code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-    "$ALF_API/people/${ALF_PERM_USER}" 2>/dev/null || echo 000)
+    "$ALF_API/people/${ALF_PERM_USER}" 2>/dev/null )
   if [ "$code" = "204" ]; then
     pass "G11: Alfresco ${ALF_PERM_USER} user deleted"
   else
     code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-      "${BASE}/alfresco/s/api/people/${ALF_PERM_USER}" 2>/dev/null || echo 000)
+      "${BASE}/alfresco/s/api/people/${ALF_PERM_USER}" 2>/dev/null )
     [ "$code" = "200" ] || [ "$code" = "204" ] \
       && pass "G11: Alfresco ${ALF_PERM_USER} user deleted (legacy API)" \
       || fail "G11: Failed to delete Alfresco ${ALF_PERM_USER} user (HTTP $code)"

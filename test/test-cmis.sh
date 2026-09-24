@@ -283,7 +283,8 @@ fi
 
 elapsed=0; health=""
 while [ $elapsed -lt 180 ]; do
-  health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+  health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null )
+code="${code:-000}"
   [ "$health" = "200" ] && break
   sleep 5; elapsed=$((elapsed+5))
 done

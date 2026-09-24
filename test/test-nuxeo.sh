@@ -274,7 +274,7 @@ nuxeo_doc_path() {
 # delete_nuxeo_doc <uid>
 delete_nuxeo_doc() {
   curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X DELETE \
-    "$NUXEO_BASE/id/$1" 2>/dev/null || echo 000
+    "$NUXEO_BASE/id/$1" 2>/dev/null
 }
 
 # remove_nuxeo_acl <uid> [acl_name]
@@ -294,7 +294,7 @@ PY
   code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_BASE/automation/Document.RemoveACL" \
     -H 'Content-Type: application/json' \
-    --data "$payload" 2>/dev/null || echo 000)
+    --data "$payload" 2>/dev/null )
   [ "$code" = "200" ] || [ "$code" = "204" ]
 }
 
@@ -303,7 +303,7 @@ create_nuxeo_user() {
   local id="$1"
   local check_code payload code
   check_code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-    "$NUXEO_BASE/user/$id" 2>/dev/null || echo 000)
+    "$NUXEO_BASE/user/$id" 2>/dev/null )
   case "$check_code" in
     200)
       info "Nuxeo user $id already exists"
@@ -330,7 +330,7 @@ PY
       code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
         "$NUXEO_BASE/user" \
         -H 'Content-Type: application/json' \
-        --data "$payload" 2>/dev/null || echo 000)
+        --data "$payload" 2>/dev/null )
       case "$code" in
         200|201) info "Created Nuxeo user $id" ; return 0 ;;
         409) info "Nuxeo user $id already exists" ; return 0 ;;
@@ -370,7 +370,7 @@ PY
       code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
         "$NUXEO_BASE/automation/Document.SetACE" \
         -H 'Content-Type: application/json' \
-        --data "$payload" 2>/dev/null || echo 000)
+        --data "$payload" 2>/dev/null )
     else
       payload=$(NUXEO_UID="$uid" NUXEO_PRINCIPAL="$principal" NUXEO_BLOCK="$block_inheritance" python3 - <<'PY'
 import json, os
@@ -391,7 +391,7 @@ PY
       code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
         "$NUXEO_BASE/automation/Document.AddPermission" \
         -H 'Content-Type: application/json' \
-        --data "$payload" 2>/dev/null || echo 000)
+        --data "$payload" 2>/dev/null )
     fi
   else
     payload=$(NUXEO_UID="$uid" NUXEO_PRINCIPAL="$principal" python3 - <<'PY'
@@ -408,7 +408,7 @@ PY
     code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
       "$NUXEO_BASE/automation/Document.RemovePermission" \
       -H 'Content-Type: application/json' \
-      --data "$payload" 2>/dev/null || echo 000)
+      --data "$payload" 2>/dev/null )
   fi
   [ "$code" = "200" ] || [ "$code" = "204" ]
 }
@@ -476,7 +476,7 @@ PY
   code=$(curl -s -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" -X POST \
     "$NUXEO_BASE/automation/Blob.AttachOnDocument" \
     -F "params=${params};type=application/json" \
-    -F "input=@${local_path};filename=${filename};type=${mime}" 2>/dev/null || echo 000)
+    -F "input=@${local_path};filename=${filename};type=${mime}" 2>/dev/null )
   [ "$code" = "200" ]
 }
 
@@ -530,19 +530,20 @@ update_nuxeo_text_document() {
 section "A — Smoke Tests (Nuxeo mode)"
 
 # N-A1: RAG service health
-code=$(curl -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null || echo 000)
+code=$(curl -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null )
+code="${code:-000}"
 [ "$code" = "200" ] && pass "N-A1: RAG service /health is UP" \
                      || fail "N-A1: RAG service returned HTTP $code"
 
 # N-A2: Nuxeo connectivity
 code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-  "$NUXEO_BASE/path/default-domain" 2>/dev/null || echo 000)
+  "$NUXEO_BASE/path/default-domain" 2>/dev/null )
 [ "$code" = "200" ] && pass "N-A2: Nuxeo repository responds" \
                      || fail "N-A2: Nuxeo /path/default-domain returned HTTP $code"
 
 # N-A3: Nuxeo batch ingester health (via proxy sync status)
 code=$(curl -sf -o /dev/null -w '%{http_code}' -u "$NUXEO_AUTH" \
-  "$SYNC_URL/status$SYNC_Q" 2>/dev/null || echo 000)
+  "$SYNC_URL/status$SYNC_Q" 2>/dev/null )
 [ "$code" = "200" ] && pass "N-A3: Nuxeo batch ingester status endpoint is healthy" \
                      || fail "N-A3: Batch ingester status returned HTTP $code"
 
@@ -688,7 +689,7 @@ section "F — Security Tests (Nuxeo mode)"
 # F-N: Unauthenticated RAG requests must be rejected with HTTP 401
 http_code_fn=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
+  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null )
 if [ "$http_code_fn" = "401" ]; then
   pass "F-N: Unauthenticated RAG request rejected (HTTP 401)"
 else

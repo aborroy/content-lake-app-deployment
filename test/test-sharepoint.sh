@@ -158,7 +158,7 @@ section "Preconditions"
 # diagnostic than the one it replaced.
 require_serving() {
   local what="$1" url="$2" auth="$3" code
-  # No `|| echo 000` here. curl writes %{http_code} itself even when it cannot connect -- it writes 000 --
+  # No `` here. curl writes %{http_code} itself even when it cannot connect -- it writes 000 --
   # and then exits non-zero, so the usual idiom concatenates the two and reports "HTTP 000000". The
   # substitution belongs on an empty result, not on a failed exit.
   code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$auth" "$url" 2>/dev/null)
@@ -177,7 +177,7 @@ require_serving "rag-service" "${RAG_URL}/health" "$RAG_AUTH"
 require_serving "Alfresco" "${ALF_BASE}/nodes/-root-" "$ALF_AUTH"
 # Ingestion embeds, so a missing AI backend fails every retrieval assertion with no hint that the cause is
 # not the connector.
-if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:12434/ 2>/dev/null || echo 000)" = "000" ]; then
+if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:12434/ 2>/dev/null)" = "000" ]; then
   echo "Nothing is listening on :12434, so embedding will fail and every retrieval assertion with it."
   echo "Enable Docker Model Runner, or run 'make start-ai' on a GPU host."
   exit 2
@@ -274,7 +274,7 @@ fi
 elapsed=0; code=000
 while [ $elapsed -lt 60 ]; do
   code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer probe" \
-    "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null || echo 000)
+    "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null )
   [ "$code" = "200" ] && break
   sleep 3; elapsed=$((elapsed+3))
 done
@@ -358,7 +358,7 @@ fi
 
 elapsed=0; health=""
 while [ $elapsed -lt 180 ]; do
-  health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+  health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null )
   [ "$health" = "200" ] && break
   sleep 5; elapsed=$((elapsed+5))
 done
@@ -586,7 +586,7 @@ if ! dc up -d --no-deps --force-recreate plugin-batch-ingester >/dev/null 2>&1; 
 else
   elapsed=0; health=""
   while [ $elapsed -lt 180 ]; do
-    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null )
     [ "$health" = "200" ] && break
     sleep 5; elapsed=$((elapsed+5))
   done
@@ -657,7 +657,7 @@ else
     elapsed=0; code=000
     while [ $elapsed -lt 60 ]; do
       code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer probe" \
-        "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null || echo 000)
+        "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null )
       [ "$code" = "200" ] && break
       sleep 3; elapsed=$((elapsed+3))
     done
@@ -705,7 +705,7 @@ dc up -d --no-deps --force-recreate mock-graph >/dev/null 2>&1
 elapsed=0; code=000
 while [ $elapsed -lt 60 ]; do
   code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer probe" \
-    "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null || echo 000)
+    "${MOCK}/v1.0/drives/${DRIVE_ID}" 2>/dev/null )
   [ "$code" = "200" ] && break
   sleep 3; elapsed=$((elapsed+3))
 done
@@ -716,7 +716,7 @@ if ! dc up -d --no-deps --force-recreate plugin-batch-ingester >/dev/null 2>&1; 
 else
   elapsed=0; health=""
   while [ $elapsed -lt 180 ]; do
-    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+    health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null )
     [ "$health" = "200" ] && break
     sleep 5; elapsed=$((elapsed+5))
   done
@@ -881,7 +881,7 @@ else
     dc restart plugin-batch-ingester >/dev/null 2>&1
     elapsed=0; health=""
     while [ $elapsed -lt 180 ]; do
-      health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null || echo 000)
+      health=$(curl -s -o /dev/null -w '%{http_code}' "${INGESTER}/actuator/health" 2>/dev/null )
       [ "$health" = "200" ] && break
       sleep 5; elapsed=$((elapsed+5))
     done

@@ -133,7 +133,8 @@ wait_for_prompt_grounded() {
 
 # ── A — Smoke ───────────────────────────────────────────────────────────────
 section "A — Smoke"
-code=$(curl $CURL_TLS -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null || echo 000)
+code=$(curl $CURL_TLS -sf -o /dev/null -w '%{http_code}' "$RAG_URL/health" 2>/dev/null )
+code="${code:-000}"
 [ "$code" = "200" ] && pass "A1: RAG service /health is UP" || fail "A1: RAG /health returned HTTP $code"
 
 # ── B — Fixture ─────────────────────────────────────────────────────────────
@@ -260,7 +261,7 @@ fb_stored=$(printf '%s' "$FB_RESP" | jq -r '.stored // false' 2>/dev/null || ech
 
 # Feedback must never be accepted anonymously (same auth contract as the other RAG endpoints).
 anon_code=$(curl $CURL_TLS -s -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/feedback" \
-  -H 'Content-Type: application/json' -d "$FB_BODY" 2>/dev/null || echo 000)
+  -H 'Content-Type: application/json' -d "$FB_BODY" 2>/dev/null )
 [ "$anon_code" = "401" ] && pass "G3: unauthenticated POST /feedback is rejected (401)" \
                          || fail "G3: expected 401 for anonymous /feedback, got HTTP $anon_code"
 

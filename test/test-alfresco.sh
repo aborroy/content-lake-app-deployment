@@ -327,7 +327,7 @@ set_node_permissions() {
   code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
-    -d "{\"permissions\":$perms_json}" 2>/dev/null || echo 000)
+    -d "{\"permissions\":$perms_json}" 2>/dev/null )
   [ "$code" = "200" ] && reconcile_node_permissions "$node_id" true
 }
 
@@ -695,7 +695,8 @@ HEADER
 section "A — Smoke Tests"
 
 # A1: Batch ingester status endpoint
-code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_URL/status" 2>/dev/null || echo 000)
+code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" "$SYNC_URL/status" 2>/dev/null )
+code="${code:-000}"
 [ "$code" = "200" ] && pass "A1: Batch ingester status endpoint is healthy" \
                      || fail "A1: Batch ingester status returned HTTP $code"
 
@@ -710,7 +711,7 @@ echo "    $(echo "$rag_health" | jq -c '{embedding:.embedding.status, hxpr:.hxpr
 
 # A3: Alfresco repository connectivity
 code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
-  "$ALF_BASE/nodes/-root-/children" 2>/dev/null || echo 000)
+  "$ALF_BASE/nodes/-root-/children" 2>/dev/null )
 [ "$code" = "200" ] && pass "A3: Alfresco repository responds" \
                      || fail "A3: Alfresco /nodes/-root-/children returned HTTP $code"
 
@@ -918,7 +919,7 @@ EOF
   code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
     "$ALF_BASE/nodes/$LIVE_NODE_ID/content" \
     -H 'Content-Type: text/plain' \
-    --data-binary "@$TMPDIR_DATA/live-test-v2.txt" 2>/dev/null || echo 000)
+    --data-binary "@$TMPDIR_DATA/live-test-v2.txt" 2>/dev/null )
   if [ "$code" = "200" ]; then
     pass "C2a: Document content updated (HTTP 200)"
     wait_for_node_present "tangerine-stellar-vortex-88q version two" "$LIVE_NODE_ID" "C2b" \
@@ -931,7 +932,7 @@ fi
 # C3: Delete document — should disappear from search
 if [ -n "$LIVE_NODE_ID" ]; then
   code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-    "$ALF_BASE/nodes/$LIVE_NODE_ID" 2>/dev/null || echo 000)
+    "$ALF_BASE/nodes/$LIVE_NODE_ID" 2>/dev/null )
   if [ "$code" = "204" ]; then
     pass "C3a: Document deleted (HTTP 204)"
     # The one wait that has to be a wait: an absence cannot be polled towards. Deletion propagates
@@ -968,7 +969,7 @@ info "For Alfresco sources, repository admins remain discoverable across Alfresc
 # G-N: Unauthenticated RAG requests must be rejected with HTTP 401
 http_code_gn=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -X POST "$RAG_URL/search/semantic" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null || echo 000)
+  -d '{"query":"test","topK":1,"minScore":0.2}' 2>/dev/null )
 if [ "$http_code_gn" = "401" ]; then
   pass "G-N: Unauthenticated RAG request rejected (HTTP 401)"
 else
@@ -1129,7 +1130,7 @@ folder_perms='{"isInheritanceEnabled":false,"locallySet":[{"authorityId":"user-a
 g9_code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT \
   "$ALF_BASE/nodes/$PERM_FOLDER_ID" \
   -H 'Content-Type: application/json' \
-  -d "{\"permissions\":$folder_perms}" 2>/dev/null || echo 000)
+  -d "{\"permissions\":$folder_perms}" 2>/dev/null )
 if [ "$g9_code" = "200" ]; then
   pass "G9: Folder permissions updated to user-a only (HTTP 200)"
 else
@@ -1288,7 +1289,7 @@ set_exclude_from_lake() {
     "$ALF_BASE/nodes/$node_id" \
     -H 'Content-Type: application/json' \
     -d "{\"aspectNames\":$merged_aspects,\"properties\":{\"cl:excludeFromLake\":true}}" \
-    2>/dev/null || echo 000)
+    2>/dev/null )
   [ "$code" = "200" ]
 }
 
@@ -1478,7 +1479,7 @@ else
 
     # Delete bravo at the source, permanently so it does not linger in the trash.
     code=$(curl -sf $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X DELETE \
-      "$ALF_BASE/nodes/$J_BRAVO_ID?permanent=true" 2>/dev/null || echo 000)
+      "$ALF_BASE/nodes/$J_BRAVO_ID?permanent=true" 2>/dev/null )
     if [ "$code" = "204" ]; then
       pass "J5: recon-bravo.txt deleted from Alfresco (HTTP $code)"
     else
