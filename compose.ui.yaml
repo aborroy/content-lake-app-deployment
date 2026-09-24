@@ -24,7 +24,7 @@ services:
 
   # Demo UI — standalone SPA for showcasing RAG without ACA (demo profile only)
   content-lake-app-ui:
-    profiles: [demo]
+    profiles: [demo, platform]
     build:
       context: "${CONTENT_LAKE_APP_UI_CONTEXT:-https://github.com/aborroy/content-lake-app-ui.git#main}"
     ports:
@@ -62,7 +62,7 @@ services:
   # ── Reverse proxy ───────────────────────────────────────────────────────────
 
   proxy:
-    profiles: [alfresco, nuxeo, full, demo]
+    profiles: [alfresco, nuxeo, full, demo, platform]
     image: nginx:stable-alpine
     ports:
       - target: 80

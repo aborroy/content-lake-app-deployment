@@ -142,7 +142,7 @@ services:
   # ── RAG service ─────────────────────────────────────────────────────────────
 
   rag-service:
-    profiles: [alfresco, nuxeo, full, demo]
+    profiles: [alfresco, nuxeo, full, demo, platform]
     image: content-lake-app/rag-service:local
     restart: unless-stopped
     build:

@@ -6,6 +6,11 @@
 #   make up-nuxeo           Nuxeo + HXPR + RAG  (~9 services, 2 from ../nuxeo-deployment)
 #   make up-full            Alfresco + Nuxeo + HXPR + RAG  (~18 services)
 #   make up-demo            Full + standalone demo UI at /  (~19 services)
+#   make up-platform        Platform only: hxpr + RAG + demo UI, no Alfresco and no Nuxeo (~6 services).
+#                           The base profile for running a connector jar as the single source: pair it with
+#                           --profile connector. Nothing can authenticate a caller in this shape yet, so
+#                           /api/rag answers 401 until content-lake-app#167 lands; ingestion and the
+#                           operator endpoints work.
 #   Plugin connector (opt-in): add the 'connector' profile to a base stack, e.g.
 #     CONNECTOR_SYNC_USERNAME=admin CONNECTOR_SYNC_PASSWORD=admin \
 #       docker compose --profile alfresco --profile connector up -d --build plugin-batch-ingester
@@ -142,7 +147,7 @@ endif
 
 DC := $(LOAD_ENV) docker compose $(ENV_ARGS)
 
-.PHONY: help up-alfresco up-nuxeo up-full up-demo down logs ps config clean start-ai stop-ai local verify-profiles
+.PHONY: help up-alfresco up-nuxeo up-full up-demo up-platform down logs ps config clean start-ai stop-ai local verify-profiles
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
@@ -213,6 +218,21 @@ endif
 	  docker compose $(ENV_ARGS) --profile demo up --build -d
 	@$(call _urls,demo)
 
+up-platform: ## Platform only (hxpr + RAG + demo UI), no Alfresco and no Nuxeo -- pair with --profile connector
+	@echo "-> Bringing up the platform with no in-tree source. Add a connector jar and --profile connector to ingest."
+ifdef USE_LOCAL
+	@echo "-> Building from local sibling directories (../content-lake-app, ../content-lake-app-ui)..."
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=plugin-batch-ingester:9096 \
+	  NGINX_ROOT_DIRECTIVE="proxy_pass http://content-lake-app-ui:80;" \
+	  docker compose $(ENV_ARGS) --profile platform build --no-cache
+endif
+	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
+	  NGINX_SYNC_DEFAULT_BACKEND=plugin-batch-ingester:9096 \
+	  NGINX_ROOT_DIRECTIVE="proxy_pass http://content-lake-app-ui:80;" \
+	  docker compose $(ENV_ARGS) --profile platform up --build -d
+	@$(call _urls,platform)
+
 down: ## Stop and remove containers (data volumes preserved)
 	$(DC) --profile '*' down
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml down 2>/dev/null || true
@@ -246,7 +266,7 @@ verify-profiles: ## Assert every opt-in profile stays opt-in (no service leaks i
 	@# deployment would suddenly need it. Compose resolves profiles here, so this catches a missing or
 	@# mistyped `profiles:` key that inspection would not.
 	@fail=0; \
-	for profile in alfresco nuxeo full demo; do \
+	for profile in alfresco nuxeo full demo platform; do \
 	  services=$$($(DC) --profile $$profile config --services 2>/dev/null | sort | tr '\n' ' '); \
 	  for optin in otel-lgtm plugin-batch-ingester opensearch-dashboards transform-liteparse transform-convert2md mock-graph; do \
 	    case " $$services " in \
@@ -281,15 +301,23 @@ define _urls
 	  echo ""; \
 	  echo "Stack starting ($(1)). Endpoints once healthy:"; \
 	  echo "  RAG API  → $$base/api/rag"; \
-	  if [ "$(1)" != "nuxeo" ]; then \
-	    echo "  ACA      → $$base/aca/"; \
-	    echo "  Alfresco → $$base/alfresco"; \
-	  fi; \
-	  if [ "$(1)" != "alfresco" ]; then \
-	    echo "  Nuxeo    → $$base/nuxeo/ui/"; \
-	  fi; \
-	  if [ "$(1)" = "demo" ]; then \
-	    echo "  Demo UI  → $$base/"; \
+	  if [ "$(1)" = "platform" ]; then \
+	    echo "  Demo UI  -> $$base/"; \
+	    echo ""; \
+	    echo "  No in-tree source in this profile. Mount a connector jar in ./connectors and add"; \
+	    echo "  --profile connector to ingest. Signing in is not available yet: content-lake-app#167."; \
+	    echo ""; \
+	  else \
+	    if [ "$(1)" != "nuxeo" ]; then \
+	      echo "  ACA      → $$base/aca/"; \
+	      echo "  Alfresco → $$base/alfresco"; \
+	    fi; \
+	    if [ "$(1)" != "alfresco" ]; then \
+	      echo "  Nuxeo    → $$base/nuxeo/ui/"; \
+	    fi; \
+	    if [ "$(1)" = "demo" ]; then \
+	      echo "  Demo UI  → $$base/"; \
+	    fi; \
 	  fi; \
 	  echo ""
 endef

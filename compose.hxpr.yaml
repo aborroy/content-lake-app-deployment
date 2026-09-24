@@ -8,7 +8,7 @@
 services:
 
   mongodb:
-    profiles: [alfresco, nuxeo, full, demo]
+    profiles: [alfresco, nuxeo, full, demo, platform]
     image: mongo:${MONGODB_TAG:-8.2.5}
     restart: unless-stopped
     hostname: mongo
@@ -24,7 +24,7 @@ services:
       - stack
 
   opensearch:
-    profiles: [alfresco, nuxeo, full, demo]
+    profiles: [alfresco, nuxeo, full, demo, platform]
     image: opensearchproject/opensearch:${OPENSEARCH_TAG:-2.19.6}
     restart: unless-stopped
     hostname: opensearch
@@ -61,7 +61,7 @@ services:
       - stack
 
   hxpr-app:
-    profiles: [alfresco, nuxeo, full, demo]
+    profiles: [alfresco, nuxeo, full, demo, platform]
     image: "${HXPR_LOCAL_IMAGE:-content-lake-app/hxpr-app:local}"
     restart: unless-stopped
     build:

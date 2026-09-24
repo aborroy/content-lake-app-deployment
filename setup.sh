@@ -3,12 +3,12 @@
 # Content Lake — First-run setup script
 # Validates prerequisites, configures credentials, pulls AI
 # models, and starts the stack.
-# Usage: ./setup.sh [alfresco|nuxeo|full|demo]  (default: alfresco)
+# Usage: ./setup.sh [alfresco|nuxeo|full|demo|platform]  (default: alfresco)
 # =============================================================
 set -euo pipefail
 
 PROFILE="${1:-alfresco}"
-VALID_PROFILES="alfresco nuxeo full demo"
+VALID_PROFILES="alfresco nuxeo full demo platform"
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; BOLD='\033[1m'; NC='\033[0m'
 
 err()  { echo -e "${RED}✗ $*${NC}" >&2; }
