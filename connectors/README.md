@@ -102,12 +102,13 @@ one that ingests from the registry, so it is the only one with state to keep.
 
 ## The shipped connectors
 
-Two jars are built from `../content-lake-app/plugins/` rather than written for one deployment. Their settings
+Three jars are built from `../content-lake-app/plugins/` rather than written for one deployment. Their settings
 arrive as environment variables like any other, using the names their schemas declare.
 
 | Connector | Jar | Settings |
 |---|---|---|
 | CMIS 1.1 | `cmis-connector-1.0.0.jar` | `CMIS_URL`, `CMIS_USERNAME`, `CMIS_PASSWORD`, `CMIS_ROOT_PATH`, ... |
+| Filesystem | `filesystem-connector-1.0.0.jar` | `FILESYSTEM_ROOT_PATH`, `FILESYSTEM_EXCLUDE_PATTERNS`, ... |
 | SharePoint Online | `sharepoint-connector-1.0.0.jar` | `SHAREPOINT_DRIVE_IDS`, `SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, `SHAREPOINT_CLIENT_SECRET`, `SHAREPOINT_PERMISSIONS_MODE`, ... |
 
 Both are declared with defaults in the `plugin-batch-ingester` block of `compose.content-lake.yaml`, where
