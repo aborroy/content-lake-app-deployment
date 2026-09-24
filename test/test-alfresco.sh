@@ -350,6 +350,11 @@ create_alfresco_user() {
 
 # ── Test data ─────────────────────────────────────────────────────────────────
 create_test_data() {
+  # --- detached-signature.p7s: a type that cannot contain text ---
+  # Backs B15. NonTextContentPolicy denies the .p7s extension, so the pipeline records SKIPPED without
+  # downloading the bytes. The content is irrelevant by construction: nothing ever reads it.
+  printf 'not text, and never downloaded' > "$TMPDIR_DATA/detached-signature.p7s"
+
   # --- short-memo.txt: HR topic, ~400 words ---
   cat > "$TMPDIR_DATA/short-memo.txt" <<'EOF'
 MEMORANDUM
@@ -759,17 +764,18 @@ SEC_ID=$(upload_file   "$FOLDER_ID" "$TMPDIR_DATA/security-policy.txt"  "securit
 ROAD_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/product-roadmap.txt"  "product-roadmap.txt"  "text/plain")
 TECH_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/technical-spec.txt"   "technical-spec.txt"   "text/plain")
 LONG_ID=$(upload_file  "$FOLDER_ID" "$TMPDIR_DATA/long-report.txt"      "long-report.txt"      "text/plain")
+SIG_ID=$(upload_file   "$FOLDER_ID" "$TMPDIR_DATA/detached-signature.p7s" "detached-signature.p7s" "application/octet-stream")
 
 for entry in "short-memo.txt:$TXT_ID" "security-policy.txt:$SEC_ID" \
              "product-roadmap.txt:$ROAD_ID" "technical-spec.txt:$TECH_ID" \
-             "long-report.txt:$LONG_ID"; do
+             "long-report.txt:$LONG_ID" "detached-signature.p7s:$SIG_ID"; do
   name="${entry%%:*}"; nid="${entry##*:}"
   [ -n "$nid" ] && pass "B2: Uploaded $name (nodeId=$nid)" \
                  || fail "B2: Failed to upload $name"
 done
 
 # B3a: Wait for Solr to index the uploaded files so batch discovery finds them.
-wait_for_solr_indexed "$FOLDER_ID" 5
+wait_for_solr_indexed "$FOLDER_ID" 6
 
 # B3+B4: Trigger sync with explicit folder and wait
 run_sync_wait "$FOLDER_ID"
@@ -876,6 +882,44 @@ if [ -n "${TXT_ID:-}" ]; then
       fail "B14: index-proof returned verdict '$verdict' for short-memo.txt (expected a measured verdict)"
       ;;
   esac
+fi
+
+# B15: a type that cannot contain text reports SKIPPED, not FAILED. "We did not try" and "we tried and
+# got nothing" are different facts, and only the second is a defect an operator should chase. No poll
+# deadline: the sync above already completed, and the status is written in the same pass that skips the
+# download, so it is there or the skip did not happen.
+if [ -n "${SIG_ID:-}" ]; then
+  sig_status=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" \
+    "$BASE/api/content-lake/nodes/${SIG_ID}/status" 2>/dev/null || echo '{}')
+  sig_state=$(echo "$sig_status" | jq -r '.status // "null"')
+  sig_error=$(echo "$sig_status" | jq -r '.error // "null"')
+  if [ "$sig_state" = "SKIPPED" ]; then
+    pass "B15: detached-signature.p7s reports SKIPPED (error=\"$sig_error\")"
+  else
+    fail "B15: detached-signature.p7s reports '$sig_state' (expected SKIPPED, error=\"$sig_error\")"
+  fi
+
+  # The folder rollup must not go red for it: a skip is counted separately and is not a failure.
+  # This is the operator-visible half of the change, and the half a per-document status cannot show.
+  fold_summary=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" \
+    "$BASE/api/content-lake/nodes/${FOLDER_ID}/status?includeFolderAggregate=true" 2>/dev/null || echo '{}')
+  fold_skipped=$(echo "$fold_summary" | jq -r '.folderSummary.skippedDocuments // "null"')
+  fold_total=$(echo "$fold_summary" | jq -r '.folderSummary.totalDocuments // "null"')
+  fold_indexed=$(echo "$fold_summary" | jq -r '.folderSummary.indexedDocuments // "null"')
+  fold_pending=$(echo "$fold_summary" | jq -r '.folderSummary.pendingDocuments // "null"')
+  fold_failed=$(echo "$fold_summary" | jq -r '.folderSummary.failedDocuments // "null"')
+  if [ "$fold_skipped" = "1" ]; then
+    pass "B15a: folder summary counts the skip separately (skipped=$fold_skipped of total=$fold_total)"
+  else
+    fail "B15a: folder summary reports skipped=$fold_skipped (expected 1) for total=$fold_total"
+  fi
+  # The four buckets must sum to the total, which is why skipped had to be added rather than folded in.
+  if [ "$fold_total" != "null" ] \
+     && [ $((fold_indexed + fold_pending + fold_failed + fold_skipped)) -eq "$fold_total" ]; then
+    pass "B15b: folder summary counts sum (indexed=$fold_indexed pending=$fold_pending failed=$fold_failed skipped=$fold_skipped = total=$fold_total)"
+  else
+    fail "B15b: folder summary counts do not sum: indexed=$fold_indexed pending=$fold_pending failed=$fold_failed skipped=$fold_skipped vs total=$fold_total"
+  fi
 fi
 
 fi  # end FOLDER_ID != NONE block
