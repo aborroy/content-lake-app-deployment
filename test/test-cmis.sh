@@ -305,6 +305,7 @@ else
 fi
 
 schema=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/connectors/schema" 2>/dev/null || echo '[]')
+# .required/.secret] | first // false: boolean fields expected to be true or missing; false fallthrough == false is correct.
 url_required=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "cmis.url") | .required] | first // false')
 password_secret=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "cmis.password") | .secret] | first // false')
 if [ "$url_required" = "true" ] && [ "$password_secret" = "true" ]; then

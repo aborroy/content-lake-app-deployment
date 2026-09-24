@@ -255,6 +255,7 @@ req_id=$(printf '%s' "$PROMPT_RESP" | jq -r '.requestId // empty' 2>/dev/null ||
 FB_BODY="{\"requestId\":$(json_escape "$req_id"),\"rating\":\"down\",\"comment\":\"e2e smoke ${TEST_RUN_TAG}\",\"question\":$(json_escape "What does the $SENTINEL document say about the advisor pipeline?")}"
 FB_RESP=$(curl $CURL_TLS -sf -m 30 -u "$ALF_AUTH" -X POST "$RAG_URL/feedback" \
   -H 'Content-Type: application/json' -d "$FB_BODY" 2>/dev/null || echo '{}')
+# .stored // false is safe: truthiness test (want true), not testing for explicit false.
 fb_stored=$(printf '%s' "$FB_RESP" | jq -r '.stored // false' 2>/dev/null || echo false)
 [ "$fb_stored" = "true" ] && pass "G2: POST /feedback stored the rating" \
                           || fail "G2: POST /feedback did not store the rating (resp: $FB_RESP)"

@@ -384,6 +384,7 @@ schema=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/connectors/schema" 2>/dev/nul
 drives_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.drive-ids")] | length')
 site_url_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.site-url")] | length')
 folder_paths_present=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.folder-paths")] | length')
+# .secret] | first // false is safe: .secret field is expected to be true or missing; false fallthrough == false is correct.
 secret_marked=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.client-secret") | .secret] | first // false')
 cache_marked=$(echo "$schema" | jq -r '[.[]?.fields[]? | select(.name == "sharepoint.token-cache-path") | .secret] | first // false')
 if [ "$drives_present" = "1" ] && [ "$site_url_present" = "1" ] && [ "$folder_paths_present" = "1" ] \
@@ -816,6 +817,7 @@ else
     sel=$(curl -sf -u "$SYNC_AUTH" -X PUT "${INGESTER}/api/selection" \
       -H 'Content-Type: application/json' \
       -d "{\"rootNodeIds\":[\"${SELECTED_ROOT}\"]}" 2>/dev/null || echo '{}')
+    # .chosen // false is safe here: testing for truthiness (chosen == true), not distinguishing false vs missing.
     if [ "$(echo "$sel" | jq -r '.chosen // false')" = "true" ] \
        && [ "$(echo "$sel" | jq -r '.rootNodeIds[0] // empty')" = "$SELECTED_ROOT" ]; then
       pass "S33: a selection written through the API is recorded against this source"
@@ -886,6 +888,7 @@ else
       sleep 5; elapsed=$((elapsed+5))
     done
     survived=$(curl -sf -u "$SYNC_AUTH" "${INGESTER}/api/selection" 2>/dev/null || echo '{}')
+    # .chosen // false is safe: truthiness test, not distinguishing explicit false from missing.
     if [ "$(echo "$survived" | jq -r '.rootNodeIds[0] // empty')" = "$SELECTED_ROOT" ] \
        && [ "$(echo "$survived" | jq -r '.chosen // false')" = "true" ]; then
       pass "S38: the selection survived a container restart"

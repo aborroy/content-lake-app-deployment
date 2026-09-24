@@ -317,7 +317,9 @@ reconcile_node_permissions() {
   resp=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$SYNC_URL/permissions" \
     -H 'Content-Type: application/json' \
     -d "{\"nodeIds\":[\"$node_id\"],\"recursive\":$recursive}" 2>/dev/null || echo '{}')
-  failed=$(echo "$resp" | jq -r '.failed // 1' 2>/dev/null || echo 1)
+  # Use .failed // null, not // 1: if .failed is 0 (success) we want 0, not a fallthrough.
+  # jq's // falls through on false/null/empty, so a boolean false would trigger the fallback incorrectly.
+  failed=$(echo "$resp" | jq -r 'if has("failed") then .failed else 1 end' 2>/dev/null || echo 1)
   [ "$failed" = "0" ]
 }
 
