@@ -24,6 +24,12 @@
 #   - It does not poll for minutes. The permission filter picks up a new source within its 30-second
 #     discovery window, so a document that is not retrievable inside a minute will not become so.
 #
+# It recreates rag-service with CMIS as its ONLY caller authentication, blanking the Alfresco and Nuxeo URLs,
+# and restores it in cleanup. That is what makes the authentication assertions mean something: with those two
+# configured, a caller who happens to exist in Alfresco authenticates there and the assertion would prove
+# Alfresco authentication rather than CMIS. The consequence is that this suite must NOT run concurrently with
+# the Alfresco or Nuxeo suites, because for the duration of that block no caller of either can sign in.
+#
 # Prerequisites:
 #   - the alfresco (or full/demo) base stack already up and healthy
 #   - the AI backend on :12434, since ingestion embeds
@@ -78,7 +84,10 @@ CONNECTOR_DIR="${APP_SOURCE}/plugins/cmis-connector"
 JAR_NAME="cmis-connector-1.0.0.jar"
 BUILT_JAR="${CONNECTOR_DIR}/target/${JAR_NAME}"
 SOURCE_TYPE="cmis"
-FIXTURE_COUNT=3
+FIXTURE_COUNT=4
+# Host-reachable CMIS, for reading a fixture's own ACL. Not the same URL the connector and rag-service use:
+# theirs resolves inside the stack network, this one goes through the proxy.
+CMIS_BROWSER_HOST="${BASE}/alfresco/api/-default-/public/cmis/versions/1.1/browser"
 
 TMPDIR_DATA="$(mktemp -d)"
 LOG="test-results-cmis-$(date +%Y%m%d-%H%M%S).log"
@@ -100,10 +109,14 @@ dc() {
 }
 
 FOLDER_ID=""
+GROUP_ID=""
+RAG_RECONFIGURED=false
 cleanup() {
   rm -rf "$TMPDIR_DATA"
   if [ "$KEEP_RUNNING" = "true" ]; then
     info "KEEP_RUNNING=true: the service, ./connectors/${JAR_NAME} and the Alfresco fixtures are left in place"
+    info "rag-service is also left with CMIS as its only authentication path, so no Alfresco or Nuxeo"
+    info "caller can sign in until it is recreated without RAG_SECURITY_CMIS_* and with the two URLs back"
     return
   fi
   info "Removing the connector service and its jar"
@@ -112,6 +125,18 @@ cleanup() {
   if [ -n "$FOLDER_ID" ]; then
     curl -s $CURL_OPTS -o /dev/null -u "$ALF_AUTH" -X DELETE \
       "$ALF_BASE/nodes/${FOLDER_ID}?permanent=true" 2>/dev/null
+  fi
+  if [ -n "$GROUP_ID" ]; then
+    curl -s $CURL_OPTS -o /dev/null -u "$ALF_AUTH" -X DELETE "$ALF_BASE/groups/${GROUP_ID}" 2>/dev/null
+  fi
+  # rag-service belongs to the base stack and this suite reconfigured it, so it is put back as it was.
+  # Without this, a stack left running has no Alfresco or Nuxeo credential authority at all: every caller of
+  # every other suite would 401, which reads as a broken stack rather than as this suite's leftovers.
+  if [ "$RAG_RECONFIGURED" = "true" ]; then
+    info "Restoring rag-service with its Alfresco and Nuxeo authentication back"
+    ( unset RAG_SECURITY_CMIS_ENABLED RAG_SECURITY_CMIS_URL RAG_SECURITY_CMIS_REPOSITORY_ID \
+            ALFRESCO_URL NUXEO_URL
+      dc up -d --no-deps --force-recreate rag-service >/dev/null 2>&1 )
   fi
 }
 trap cleanup EXIT
@@ -144,6 +169,14 @@ Restricted tender ${RUN_TAG}.
 The sealed bid for the Frederikshavn quay extension was priced at nineteen million kroner and must not
 be disclosed before the award date.
 EOF
+# The group-grant fixture. Its distinguishing phrase is "Hirtshals pontoon", unique to this document rather
+# than the run tag every fixture carries: the absence assertion below would otherwise be unfalsifiable, since
+# any readable fixture would satisfy a match on the shared tag.
+cat > "${TMPDIR_DATA}/group-granted-berth.txt" <<EOF
+Berth allocation ${RUN_TAG}.
+The Hirtshals pontoon mooring was reassigned to the inshore fleet after the winter storm damage survey,
+with the reallocation recorded against the harbour master's standing order.
+EOF
 
 FOLDER_ID=$(curl -sf $CURL_OPTS -u "$ALF_AUTH" -X POST "$ALF_BASE/nodes/-root-/children" \
   -H 'Content-Type: application/json' \
@@ -164,10 +197,11 @@ upload() {
 SURVEY_ID=$(upload harbour-survey.txt)
 KILN_ID=$(upload kiln-maintenance.md "text/markdown")
 TENDER_ID=$(upload restricted-tender.txt)
-if [ -n "$SURVEY_ID" ] && [ -n "$KILN_ID" ] && [ -n "$TENDER_ID" ]; then
+BERTH_ID=$(upload group-granted-berth.txt)
+if [ -n "$SURVEY_ID" ] && [ -n "$KILN_ID" ] && [ -n "$TENDER_ID" ] && [ -n "$BERTH_ID" ]; then
   pass "C2: ${FIXTURE_COUNT} documents uploaded"
 else
-  fail "C2: upload failed (survey=${SURVEY_ID} kiln=${KILN_ID} tender=${TENDER_ID})"
+  fail "C2: upload failed (survey=${SURVEY_ID} kiln=${KILN_ID} tender=${TENDER_ID} berth=${BERTH_ID})"
   exit 1
 fi
 
@@ -194,6 +228,62 @@ if [ "$(restrict_to_admin "$TENDER_ID")" = "200" ]; then
   pass "C3: restricted-tender.txt restricted to admin (inheritance off)"
 else
   fail "C3: could not restrict restricted-tender.txt"
+fi
+
+# --- The group-grant fixture, which asserts an accepted limitation as behaviour ---
+# CMIS has no memberOf in the specification, so nothing at query time can say which CMIS groups a caller is
+# in. A document granted only to a group is therefore invisible to its members: fail-closed, so nothing leaks,
+# but incomplete. That is accepted rather than fixed, and this fixture is what makes it verifiable instead of
+# assumed.
+#
+# Granted to the group AND to admin by name. The by-name grant is not redundant: the Alfresco administrator
+# bypass is keyed on the alfresco source type and never covers a cmis source, so without it admin could not
+# retrieve this document either and the pair of assertions below would not distinguish "group grants do not
+# resolve" from "this document was never ingested".
+GROUP_SHORT="cmis-berth-${RUN_TAG}"
+GROUP_ID="GROUP_${GROUP_SHORT}"
+group_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X POST "$ALF_BASE/groups" \
+  -H 'Content-Type: application/json' \
+  -d "{\"id\":\"${GROUP_SHORT}\",\"displayName\":\"CMIS berth readers ${RUN_TAG}\"}")
+member_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" \
+  -X POST "$ALF_BASE/groups/${GROUP_ID}/members" \
+  -H 'Content-Type: application/json' \
+  -d "{\"id\":\"${CMIS_READER}\",\"memberType\":\"PERSON\"}")
+grant_code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$ALF_AUTH" -X PUT "$ALF_BASE/nodes/${BERTH_ID}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"permissions\":{\"isInheritanceEnabled\":false,\"locallySet\":[
+        {\"authorityId\":\"${GROUP_ID}\",\"name\":\"Consumer\",\"accessStatus\":\"ALLOWED\"},
+        {\"authorityId\":\"admin\",\"name\":\"Coordinator\",\"accessStatus\":\"ALLOWED\"}]}}")
+if [ "$group_code" = "201" ] || [ "$group_code" = "409" ]; then
+  case "$member_code" in 201|409) member_ok=true ;; *) member_ok=false ;; esac
+else
+  member_ok=false
+fi
+if [ "$member_ok" = "true" ] && [ "$grant_code" = "200" ]; then
+  pass "C23: group-granted-berth.txt granted to ${GROUP_ID} (which ${CMIS_READER} is in) and to admin by name"
+else
+  fail "C23: could not set up the group grant (group=${group_code} member=${member_code} acl=${grant_code})"
+fi
+
+# Diagnose from the source system before trusting either assertion below. One CMIS call shows the ACEs as the
+# connector will read them, so a failure downstream is attributable to the mapping or the query rather than to
+# a fixture that was never what it was meant to be. This has paid off here before: an ACL assertion that
+# looked like a mapping bug turned out to be a test asserting the wrong thing.
+acl_json=$(curl -s $CURL_OPTS -u "$ALF_AUTH" \
+  "${CMIS_BROWSER_HOST}/-default-/root?objectId=${BERTH_ID}&cmisselector=acl&onlyBasicPermissions=true" \
+  2>/dev/null || echo '{}')
+acl_principals=$(echo "$acl_json" | jq -r '[.aces[]?.principal.principalId] | sort | unique | join(", ")' \
+  2>/dev/null || echo "")
+info "Source ACEs on group-granted-berth.txt: ${acl_principals:-<none read>}"
+if echo "$acl_principals" | grep -q "$GROUP_ID"; then
+  if echo "$acl_principals" | grep -qw "$CMIS_READER"; then
+    # Would make the absence assertion unfalsifiable: the reader would match by name, not through the group.
+    fail "C24: the source ACL grants ${CMIS_READER} by name, so C25 could not distinguish a group grant"
+  else
+    pass "C24: the source ACL names ${GROUP_ID} and does not grant ${CMIS_READER} by name"
+  fi
+else
+  fail "C24: ${GROUP_ID} is not in the source ACL (read: ${acl_principals:-<none>}), so C25 would prove nothing"
 fi
 
 # ── The native adapter first, so there is a set to compare against ─────────────
@@ -352,6 +442,49 @@ else
 fi
 
 # ── Retrievable, without pinning a permission source ───────────────────────────
+section "Recreate rag-service with CMIS as its only authentication path"
+# Needed anyway, because RAG_SECURITY_CMIS_* has to reach the container. Blanking the other two costs nothing
+# extra and is what makes C21 below mean something: with an Alfresco and a Nuxeo URL configured, a caller who
+# happens to exist in Alfresco authenticates there and the assertion would prove Alfresco authentication, not
+# CMIS. Both of those authenticators decline without a call on a blank base URL.
+#
+# So this suite must NOT run concurrently with test-alfresco.sh or the Nuxeo suite: they authenticate real
+# users against those two sources, and for the duration of this block nobody can.
+#
+# If a blank URL ever breaks startup, use an unresolvable .invalid host rather than a routable dead one, so
+# DNS fails fast instead of the request hanging to its timeout on every login.
+export ALFRESCO_URL=""
+export NUXEO_URL=""
+export RAG_SECURITY_CMIS_ENABLED=true
+export RAG_SECURITY_CMIS_URL="$CMIS_ENDPOINT"
+export RAG_SECURITY_CMIS_REPOSITORY_ID="-default-"
+RAG_RECONFIGURED=true
+# Built, not just recreated: the authenticator is new code, so a stack brought up before it existed runs an
+# image with no such bean, and every assertion below would fail as "not retrievable" with no hint why.
+if ! dc build rag-service; then
+  fail "C27: the rag-service image did not build"
+  exit 1
+fi
+if ! dc up -d --no-deps --force-recreate rag-service >/dev/null 2>&1; then
+  fail "C27: rag-service did not restart with the CMIS authenticator"
+  exit 1
+fi
+# 300s, matching run-tests.sh and test-sharepoint.sh: a force-recreated rag-service boots a JVM and waits on
+# its dependencies, and 180s was measured elsewhere in this repository as not enough.
+elapsed=0; rag=""
+while [ $elapsed -lt 300 ]; do
+  rag=$(curl -s $CURL_OPTS -u "$RAG_AUTH" "${RAG_URL}/health" 2>/dev/null | jq -r '.status // "?"')
+  [ "$rag" = "UP" ] && break
+  sleep 5; elapsed=$((elapsed+5))
+done
+if [ "$rag" = "UP" ]; then
+  pass "C27: rag-service is UP with CMIS as its only caller authentication (${elapsed}s)"
+else
+  fail "C27: rag-service never became UP (last status ${rag})"
+  dc logs --tail 80 rag-service
+  exit 1
+fi
+
 section "Retrieval"
 # No rag.permission.source-ids pin here, unlike test-connector.sh: since #133 the permission filter
 # discovers every source in the index and builds a clause for each, so a source rag-service was never
@@ -364,7 +497,7 @@ find_document() {
   local waited=0 resp hits deadline
   # An absence is concluded in ONE probe rather than polled to a deadline. Its precondition is that a
   # presence assertion for the same document has already passed under a different caller (C16 for the
-  # restricted fixture, C23 for the group-granted one), which is what proves retrieval works at all; without
+  # restricted fixture, C25 for the group-granted one), which is what proves retrieval works at all; without
   # that, a single probe would be satisfied by a broken pipeline. Waiting to conclude an absence spent a
   # minute per assertion to report nothing that the first probe had not already reported.
   deadline=$([ "$expect" = "found" ] && echo "$POLL_DEADLINE_S" || echo 0)
@@ -408,8 +541,9 @@ section "ACL mapping"
 # to admin with inheritance off. A connector that ignored ACLs would return both to any caller.
 find_document "What was the sealed bid for the Frederikshavn quay extension priced at?" "Frederikshavn" \
   "restricted-tender.txt is retrievable by admin" "C16"
-# C21 and C22 are numbered after the suite's previous last id rather than renumbering the file, so they
-# read out of order here. They run before C17 and C18 because they are the precondition for them.
+# C21 to C27 are all numbered after the suite's previous last id (C20) rather than renumbering the file, so
+# they read out of order wherever they appear. C21 and C22 run here, before C17 and C18, because they are the
+# precondition for them: an absence assertion proves nothing until the caller is known to authenticate.
 #
 # What they replace: a guard that could never fail. `curl` without --fail exits 0 for any HTTP response, and
 # /api/rag/health is permitAll anyway, so the warn-and-skip branch was unreachable and the guard proved
@@ -446,10 +580,26 @@ find_document "How much silt was removed from the outer channel at Skagen?" "Ska
   "harbour-survey.txt IS retrievable by ${CMIS_READER} (inherited GROUP_EVERYONE)" "C18" \
   "${CMIS_READER}:password"
 
+# The accepted group limitation, asserted in both directions. C25 first, because it is the falsifiability
+# check: it proves the document was ingested and its ACL mapped, without which C26 would pass for the wrong
+# reason. admin retrieves it through the by-name grant, not a bypass, which does not apply to a cmis source.
+find_document "Which mooring was reassigned to the inshore fleet after the storm damage survey?" \
+  "Hirtshals pontoon" \
+  "group-granted-berth.txt IS retrievable by admin (granted by name)" "C25"
+find_document "Which mooring was reassigned to the inshore fleet after the storm damage survey?" \
+  "Hirtshals pontoon" \
+  "group-granted-berth.txt is NOT retrievable by ${CMIS_READER} despite their group grant" "C26" \
+  "${CMIS_READER}:password" "absent"
+
 # Stated rather than asserted, so the gap is owned: the fail-closed path cannot be exercised here.
 info "Not covered by this suite: a repository reporting capabilityACL=NONE. Alfresco reports 'manage',"
 info "so the fail-closed refusal and the sync-account/public fallbacks are unit-tested only"
 info "(CmisAclMapperTest), and the connector logs which one is in force at startup."
+# The second gap is asserted rather than merely stated, by C25 and C26, but it belongs on this list too
+# because it is a limitation an operator has to know about rather than a case the suite skips.
+info "Also a known limitation, not a defect: CMIS group grants do not resolve at query time, because CMIS"
+info "has no memberOf operation. A document granted only to a group is invisible to its members"
+info "(fail-closed, so nothing leaks, but results are incomplete). C25 and C26 assert exactly that."
 
 # ── Idempotency ────────────────────────────────────────────────────────────────
 section "Re-sync"

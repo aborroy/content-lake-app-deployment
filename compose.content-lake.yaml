@@ -152,10 +152,17 @@ services:
       additional_contexts:
         code: "${CONTENT_LAKE_GIT_CONTEXT:-https://github.com/aborroy/content-lake-app.git#main}"
     environment:
-      ALFRESCO_URL: http://alfresco:8080
+      # Overridable, with the stack's own values as the defaults, so nothing changes for a normal run. Set
+      # either to the empty string and that source's caller authentication declines without a call, which is
+      # how test-cmis.sh isolates CMIS as the only authentication path. Nothing else here needs that.
+      #
+      # ${VAR-default}, not ${VAR:-default}: the single dash substitutes only when the variable is UNSET, so
+      # an explicitly empty value stays empty. With a colon an empty override would silently fall back to the
+      # URL below and the suite would be proving Alfresco authentication again.
+      ALFRESCO_URL: ${ALFRESCO_URL-http://alfresco:8080}
       ALFRESCO_INTERNAL_USERNAME: ${ALFRESCO_ADMIN_USER}
       ALFRESCO_INTERNAL_PASSWORD: ${ALFRESCO_ADMIN_PASSWORD}
-      NUXEO_URL: http://host.docker.internal:8081/nuxeo
+      NUXEO_URL: ${NUXEO_URL-http://host.docker.internal:8081/nuxeo}
       NUXEO_USERNAME: ${NUXEO_USERNAME:-Administrator}
       NUXEO_PASSWORD: ${NUXEO_PASSWORD:-Administrator}
       NUXEO_SOURCE_ID: ${NUXEO_SOURCE_ID:-local}
@@ -199,6 +206,21 @@ services:
       # <username>@<domain>. Anything more elaborate is an identity-mapping problem this does not solve; an
       # unknown identity is a 404, which costs the caller only this source's group grants.
       RAG_SECURITY_ENTRA_USERNAME_SUFFIX: ${RAG_SECURITY_ENTRA_USERNAME_SUFFIX:-}
+      # Caller authentication against a CMIS repository, so a deployment whose only source is the CMIS
+      # connector can be queried by its own users rather than by a service account.
+      #
+      # Unlike every resolver above, this uses the CALLER'S OWN credentials: there is no service account and
+      # no secret here, which is the whole reason it needs no registration or credential to be useful.
+      #
+      # Consulted only after Alfresco and Nuxeo decline, so turning it on cannot change where an existing
+      # deployment's passwords are sent first. Enabled with a blank URL fails startup naming the setting,
+      # rather than silently refusing every CMIS caller.
+      RAG_SECURITY_CMIS_ENABLED: ${RAG_SECURITY_CMIS_ENABLED:-false}
+      # The same endpoint the connector takes as CMIS_URL. Resolved inside the stack network.
+      RAG_SECURITY_CMIS_URL: ${RAG_SECURITY_CMIS_URL:-}
+      # Optional. When set, the service document must name this repository, so a URL pointed at the wrong
+      # CMIS server is rejected rather than trusted with a caller's password.
+      RAG_SECURITY_CMIS_REPOSITORY_ID: ${RAG_SECURITY_CMIS_REPOSITORY_ID:-}
       # Accounts allowed to read every submitter's feedback (GET /api/rag/feedback?scope=all). Everyone
       # else reads only their own ratings. The application default is empty; this stack names the two
       # repository admin accounts so `cleval feedback import`, which needs the whole corpus, works
