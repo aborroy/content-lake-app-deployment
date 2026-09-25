@@ -362,8 +362,13 @@ section "Retrieval"
 find_document() {
   local query="$1" phrase="$2" label="$3" tid="$4" auth="${5:-$RAG_AUTH}" expect="${6:-found}"
   local waited=0 resp hits deadline
-  deadline=$([ "$expect" = "found" ] && echo "$POLL_DEADLINE_S" || echo 60)
-  while [ $waited -lt "$deadline" ]; do
+  # An absence is concluded in ONE probe rather than polled to a deadline. Its precondition is that a
+  # presence assertion for the same document has already passed under a different caller (C16 for the
+  # restricted fixture, C23 for the group-granted one), which is what proves retrieval works at all; without
+  # that, a single probe would be satisfied by a broken pipeline. Waiting to conclude an absence spent a
+  # minute per assertion to report nothing that the first probe had not already reported.
+  deadline=$([ "$expect" = "found" ] && echo "$POLL_DEADLINE_S" || echo 0)
+  while :; do
     resp=$(curl $CURL_OPTS -sf -u "$auth" -X POST "${RAG_URL}/search/semantic" \
       -H 'Content-Type: application/json' \
       -d "{\"query\":\"${query}\",\"topK\":30,\"minScore\":0.2}" 2>/dev/null || echo '{}')
@@ -379,7 +384,9 @@ find_document() {
       fi
       return 0
     fi
-    sleep 10; waited=$((waited+10))
+    waited=$((waited+10))
+    [ $waited -ge "$deadline" ] && break
+    sleep 10
   done
   if [ "$expect" = "found" ]; then
     fail "${tid}: ${label} - not retrievable after ${waited}s"
@@ -401,15 +408,43 @@ section "ACL mapping"
 # to admin with inheritance off. A connector that ignored ACLs would return both to any caller.
 find_document "What was the sealed bid for the Frederikshavn quay extension priced at?" "Frederikshavn" \
   "restricted-tender.txt is retrievable by admin" "C16"
-if curl -s $CURL_OPTS -o /dev/null -u "${CMIS_READER}:password" "${RAG_URL}/health"; then
-  find_document "What was the sealed bid for the Frederikshavn quay extension priced at?" "Frederikshavn" \
-    "restricted-tender.txt is NOT retrievable by ${CMIS_READER}" "C17" "${CMIS_READER}:password" "absent"
-  find_document "How much silt was removed from the outer channel at Skagen?" "Skagen" \
-    "harbour-survey.txt IS retrievable by ${CMIS_READER} (inherited GROUP_EVERYONE)" "C18" \
-    "${CMIS_READER}:password"
+# C21 and C22 are numbered after the suite's previous last id rather than renumbering the file, so they
+# read out of order here. They run before C17 and C18 because they are the precondition for them.
+#
+# What they replace: a guard that could never fail. `curl` without --fail exits 0 for any HTTP response, and
+# /api/rag/health is permitAll anyway, so the warn-and-skip branch was unreachable and the guard proved
+# nothing about the reader. Worse, C17 is an ABSENCE assertion, so if the reader could not authenticate at all
+# it would have passed vacuously: every search 401s, zero hits, "absent" satisfied. An authenticated endpoint
+# and a real status code are what make C17 mean something.
+section "The reader can authenticate, which is C17's precondition"
+search_status() {
+  local auth="$1" code
+  # No `|| echo` here: curl writes %{http_code} itself even when it cannot connect, writing 000, and then
+  # exits non-zero, so the usual idiom concatenates the two and reports HTTP 000000. The default belongs on
+  # an empty result, not on a failed exit.
+  code=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' -u "$auth" -X POST "${RAG_URL}/search/semantic" \
+    -H 'Content-Type: application/json' -d '{"query":"authentication probe","topK":1}' 2>/dev/null)
+  echo "${code:-000}"
+}
+reader_code=$(search_status "${CMIS_READER}:password")
+if [ "$reader_code" = "200" ]; then
+  pass "C21: ${CMIS_READER} authenticates on an authenticated endpoint (HTTP 200)"
 else
-  warn "C17/C18 skipped: ${CMIS_READER} cannot authenticate against the RAG service"
+  fail "C21: ${CMIS_READER} could not authenticate for a search (HTTP ${reader_code}); C17 below would pass vacuously"
 fi
+# So C21 is not an anonymous pass: the same call with a wrong password must be refused.
+wrong_code=$(search_status "${CMIS_READER}:definitely-not-the-password")
+if [ "$wrong_code" = "401" ]; then
+  pass "C22: a wrong password for ${CMIS_READER} is refused (HTTP 401)"
+else
+  fail "C22: a wrong password returned HTTP ${wrong_code}, so C21 does not prove authentication"
+fi
+
+find_document "What was the sealed bid for the Frederikshavn quay extension priced at?" "Frederikshavn" \
+  "restricted-tender.txt is NOT retrievable by ${CMIS_READER}" "C17" "${CMIS_READER}:password" "absent"
+find_document "How much silt was removed from the outer channel at Skagen?" "Skagen" \
+  "harbour-survey.txt IS retrievable by ${CMIS_READER} (inherited GROUP_EVERYONE)" "C18" \
+  "${CMIS_READER}:password"
 
 # Stated rather than asserted, so the gap is owned: the fail-closed path cannot be exercised here.
 info "Not covered by this suite: a repository reporting capabilityACL=NONE. Alfresco reports 'manage',"
