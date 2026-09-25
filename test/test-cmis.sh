@@ -269,8 +269,11 @@ fi
 # connector will read them, so a failure downstream is attributable to the mapping or the query rather than to
 # a fixture that was never what it was meant to be. This has paid off here before: an ACL assertion that
 # looked like a mapping bug turned out to be a test asserting the wrong thing.
+# /root and not /<repositoryId>/root: the browser binding's rootFolderUrl carries no repository-id segment,
+# and every other shape answers {"exception":"notSupported"} with a 200, so a wrong URL here reads as an empty
+# ACL rather than as an error.
 acl_json=$(curl -s $CURL_OPTS -u "$ALF_AUTH" \
-  "${CMIS_BROWSER_HOST}/-default-/root?objectId=${BERTH_ID}&cmisselector=acl&onlyBasicPermissions=true" \
+  "${CMIS_BROWSER_HOST}/root?objectId=${BERTH_ID}&cmisselector=acl&onlyBasicPermissions=true" \
   2>/dev/null || echo '{}')
 acl_principals=$(echo "$acl_json" | jq -r '[.aces[]?.principal.principalId] | sort | unique | join(", ")' \
   2>/dev/null || echo "")
