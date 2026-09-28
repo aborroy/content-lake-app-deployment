@@ -173,6 +173,12 @@ The **quarterly-report.pdf** should be a real PDF containing "pangolin-ledger-pd
 
 ### Permission Setup
 
+**IMPORTANT: Never share fixtures with site-local groups** (site Owners, Members, or Visitors). These are
+site-scoped principals with no Entra object ID, so the query-time group resolver cannot expand them. A
+document shared only with such a group will be indexed with a correct ACL but retrievable by nobody, which
+presents as a connector bug. Share with Entra ID / Microsoft 365 groups instead, which have directory object
+IDs and are resolvable.
+
 Configure sharing permissions to match the test scenarios:
 
 1. **Public folder** - Share with "Anyone with the link" (or everyone in tenant)
