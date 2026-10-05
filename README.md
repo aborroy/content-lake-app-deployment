@@ -572,7 +572,7 @@ HOST=localhost \
 **EC2 (or any remote host):**
 
 ```bash
-HOST=archer.alfdemo.com \
+HOST=demo.example.com \
   ALF_AUTH=admin:<alfresco-password> \
   NUXEO_AUTH=Administrator:<nuxeo-password> \
   ./test/smoke-test.sh
