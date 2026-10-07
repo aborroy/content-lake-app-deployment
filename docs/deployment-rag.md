@@ -45,7 +45,7 @@ spring:
       embedding:
         model: ai/mxbai-embed-large
       chat:
-        model: ai/qwen2.5
+        model: local/olmo3-7b-instruct:Q4_K_M
 
 search:
   hybrid:

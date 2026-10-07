@@ -393,12 +393,22 @@ triggers a full re-ingest. Put overrides for any of the above in `.env.local`, w
 
 2. Enable Docker Model Runner in Docker Desktop.
 
-3. Pull the AI models once:
+3. Prepare the AI models once:
 
    ```bash
    docker model pull ai/mxbai-embed-large
-   docker model pull ai/qwen2.5
+   make olmo3-local
    ```
+
+   The default chat model is Olmo 3 7B Instruct (`local/olmo3-7b-instruct:Q4_K_M`).
+   `make olmo3-local` creates it. You can skip that step: every `make up-*` target
+   runs `make ensure-llm` first, which creates the model when it is missing. Do not point `LLM_MODEL` at an Olmo 3 GGUF from
+   Hugging Face directly: its chat template makes llama.cpp abort at load, and
+   every chat request returns 500. The make target packages the same weights with
+   a corrected template. See [Why Olmo 3](#why-olmo-3).
+
+   To use Qwen 2.5 instead, run `docker model pull ai/qwen2.5` and set
+   `LLM_MODEL=ai/qwen2.5` in `.env.local`.
 
 4. Put your credentials in `.env.local` (never committed):
 
@@ -431,6 +441,47 @@ make up-full
 ```
 
 If `http://localhost/nuxeo/ui` returns `502 Bad Gateway`, check that `../nuxeo-deployment` is running and reachable on port 8081.
+
+## Why Olmo 3
+
+[Olmo 3](https://huggingface.co/collections/allenai/olmo-3) from Ai2 (Allen Institute
+for AI) is one of the few LLMs that is open source in full, not only "open weights".
+Most models that you can download publish the final weights and nothing else. Ai2
+also publishes the parts that you need to study, rebuild or audit the model:
+
+| Part | Where |
+| --- | --- |
+| Weights, Apache 2.0 | [allenai/Olmo-3-7B-Instruct](https://huggingface.co/allenai/Olmo-3-7B-Instruct), and a 32B version, [allenai/Olmo-3.1-32B-Instruct](https://huggingface.co/allenai/Olmo-3.1-32B-Instruct) |
+| Pre-training data | Dolma 3 |
+| Post-training data | Dolci (for example [allenai/Dolci-Instruct-RL](https://huggingface.co/datasets/allenai/Dolci-Instruct-RL)) |
+| Training code | [allenai/OLMo-core](https://github.com/allenai/OLMo-core) |
+| Checkpoints of every stage | base, SFT, DPO and final models, all on Hugging Face |
+| Technical report | [arXiv 2512.13961](https://arxiv.org/abs/2512.13961) |
+
+This matters for Content Lake. The project keeps the documents, the index and the
+inference on infrastructure that you run. With Olmo 3 the model follows the same
+rule: you can see what data it was trained on and how, and nothing depends on a
+licence that a vendor can change.
+
+| Deployment | Model | Why |
+| --- | --- | --- |
+| Local (Docker Model Runner) | Olmo 3 7B Instruct, Q4_K_M GGUF, about 4.2 GB | Runs on a laptop. This is the recommended model |
+| EC2 (vLLM on the A10G) | Qwen 2.5 14B Instruct, 4-bit AWQ | Olmo 3 needs more GPU memory than this host has, see below |
+
+Olmo 3 is the default for local deployment. Qwen 2.5 (`ai/qwen2.5`) is still supported; it publishes weights only, under Apache 2.0.
+
+Running Olmo 3 with vLLM needs more resources than the `g5.2xlarge` in
+[DEPLOY_EC2.md](docs/DEPLOY_EC2.md). Its A10G has 22.5 GB usable, shared by vLLM and
+the two TEI services (embeddings and reranker):
+
+- Olmo 3 7B in bf16 takes about 19.8 GB in vLLM (13.6 GB weights, 4.3 GB cache for a
+  16k-token context). It starts and answers well, but under ingestion load both TEI
+  services run out of GPU memory and return errors, while their health checks stay green.
+- Olmo 3.1 32B does not fit at all: even in 4-bit it leaves room for about 11k tokens
+  of context, and rag-service needs 16k.
+
+To run Olmo 3 on a GPU host, use a card with 48 GB, for example a `g6e.xlarge` (NVIDIA
+L40S), or run TEI on a second GPU.
 
 ## Public Endpoints
 
@@ -498,7 +549,7 @@ Key overrides:
 | `DEMO_UI_PORT` | `4200` | Direct host port for the demo UI container |
 | `MODEL_RUNNER_URL` | `http://model-runner.docker.internal` | LLM/embedding inference backend |
 | `EMBEDDING_MODEL` | `ai/mxbai-embed-large` | Embedding model |
-| `LLM_MODEL` | `ai/qwen2.5` | Chat/RAG model |
+| `LLM_MODEL` | `local/olmo3-7b-instruct:Q4_K_M` | Chat/RAG model. Run `make olmo3-local` once to create it |
 | `EXTRACTION_FORMAT` | `plaintext` | `plaintext`, `auto` or `markdown`. Whether extraction asks a transform engine for markdown, so headings and tables survive chunking. See [docs/extraction.md](docs/extraction.md) |
 | `TRANSFORM_URL` | `http://transform-core-aio:8090` | Transform engine for the Alfresco ingesters. Point at `http://transform-liteparse:8090` or `http://transform-convert2md:8090` with the `transform-extras` profile |
 | `EXTRACTION_ENGINE_URL` | *(empty)* | Transform engine for the Nuxeo ingesters and any plugin connector, which have none by default. Empty leaves them on in-process Tika |

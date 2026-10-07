@@ -117,7 +117,8 @@
 #   make up-alfresco local  Build from local checkouts
 #
 # AI inference backend (both serve on host port 12434 — run only one at a time):
-#   Dev  — enable Docker Model Runner in Docker Desktop (no extra make target needed)
+#   Dev  — enable Docker Model Runner in Docker Desktop. Every up-* target runs ensure-llm first,
+#          which packages the default Olmo 3 model (or pulls an ai/* LLM_MODEL) when it is missing
 #   Prod — make start-ai   Start TEI + vLLM stack (requires NVIDIA GPU / compose.ai.yaml)
 #          make stop-ai    Stop the TEI + vLLM stack
 # =============================================================
@@ -147,7 +148,7 @@ endif
 
 DC := $(LOAD_ENV) docker compose $(ENV_ARGS)
 
-.PHONY: help up-alfresco up-nuxeo up-full up-demo up-platform down logs ps config clean start-ai stop-ai local verify-profiles
+.PHONY: help up-alfresco up-nuxeo up-full up-demo up-platform down logs ps config clean start-ai stop-ai olmo3-local ensure-llm local verify-profiles
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
@@ -156,7 +157,7 @@ help: ## Show this help
 local: ## Placeholder target for 'local' parameter — use: make up-demo local
 	@:
 
-up-alfresco: ## Alfresco source -- core services (~17)
+up-alfresco: ensure-llm ## Alfresco source -- core services (~17)
 ifdef USE_LOCAL
 	@echo "→ Building from local sibling directories (../content-lake-app, ../alfresco-content-lake-ui)..."
 	$(LOAD_ENV) $(LOCAL_ENV_OVERRIDES) \
@@ -170,7 +171,7 @@ endif
 	  docker compose $(ENV_ARGS) --profile alfresco up --build -d
 	@$(call _urls,alfresco)
 
-up-nuxeo: ## Nuxeo source — start ../nuxeo-deployment first, then this
+up-nuxeo: ensure-llm ## Nuxeo source — start ../nuxeo-deployment first, then this
 	@echo "→ Bringing up Nuxeo server (../nuxeo-deployment)..."
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
@@ -186,7 +187,7 @@ endif
 	  docker compose $(ENV_ARGS) --profile nuxeo up --build -d
 	@$(call _urls,nuxeo)
 
-up-full: ## Alfresco + Nuxeo — start ../nuxeo-deployment first, then this
+up-full: ensure-llm ## Alfresco + Nuxeo — start ../nuxeo-deployment first, then this
 	@echo "→ Bringing up Nuxeo server (../nuxeo-deployment)..."
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
@@ -202,7 +203,7 @@ endif
 	  docker compose $(ENV_ARGS) --profile full up --build -d
 	@$(call _urls,full)
 
-up-demo: ## Full stack + demo UI at / — start ../nuxeo-deployment first, then this
+up-demo: ensure-llm ## Full stack + demo UI at / — start ../nuxeo-deployment first, then this
 	@echo "→ Bringing up Nuxeo server (../nuxeo-deployment)..."
 	$(LOAD_ENV) docker compose -f ../nuxeo-deployment/compose.yaml up -d
 ifdef USE_LOCAL
@@ -218,7 +219,7 @@ endif
 	  docker compose $(ENV_ARGS) --profile demo up --build -d
 	@$(call _urls,demo)
 
-up-platform: ## Platform only (hxpr + RAG + demo UI), no Alfresco and no Nuxeo -- pair with --profile connector
+up-platform: ensure-llm ## Platform only (hxpr + RAG + demo UI), no Alfresco and no Nuxeo -- pair with --profile connector
 	@echo "-> Bringing up the platform with no in-tree source. Add a connector jar and --profile connector to ingest."
 ifdef USE_LOCAL
 	@echo "-> Building from local sibling directories (../content-lake-app, ../content-lake-app-ui)..."
@@ -249,7 +250,14 @@ config: ## Dry-run: render the resolved compose configuration
 	  NGINX_ROOT_DIRECTIVE="return 302 /aca/;" \
 	  docker compose $(ENV_ARGS) config
 
+olmo3-local: ## Package Olmo 3 7B Instruct (the default LLM_MODEL) for Docker Model Runner
+	scripts/package-olmo3-local.sh
+
+ensure-llm: ## Package or pull LLM_MODEL if Docker Model Runner lacks it (run by every up-* target)
+	@$(LOAD_ENV) scripts/ensure-llm-model.sh
+
 start-ai: ## Start TEI + vLLM inference stack (prod, requires NVIDIA GPU)
+	@$(LOAD_ENV) scripts/check-vllm-model.sh || true
 	$(LOAD_ENV) docker compose -f compose.ai.yaml up -d
 
 stop-ai: ## Stop TEI + vLLM inference stack

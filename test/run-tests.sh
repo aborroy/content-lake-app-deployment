@@ -81,6 +81,9 @@ else
   warn "AI inference backend not reachable on :12434 — RAG generation tests may fail."
   warn "Enable Docker Model Runner (Docker Desktop) or run 'make start-ai'."
 fi
+# The suite starts stacks with docker compose, not make up-*, so it runs the same LLM_MODEL check.
+make -C "$DEPLOY_DIR" ensure-llm || die "LLM_MODEL is not available in Docker Model Runner (see 'make ensure-llm')"
+ok "LLM_MODEL available"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 # The shared readiness probes, so this script and run-phase1.sh cannot disagree about what "ready"

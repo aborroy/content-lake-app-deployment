@@ -43,7 +43,7 @@ ok "Docker Model Runner is available"
 
 # ── Pull AI models ────────────────────────────────────────────────────────────
 hdr "3/5  Pulling AI models (skip if already present)..."
-for model in ai/mxbai-embed-large ai/qwen2.5; do
+for model in ai/mxbai-embed-large; do
   if docker model inspect "$model" &>/dev/null; then
     ok "$model already present"
   else
@@ -52,6 +52,8 @@ for model in ai/mxbai-embed-large ai/qwen2.5; do
     ok "$model pulled"
   fi
 done
+( set -a; . ./.env; if [ -f .env.local ]; then . ./.env.local; fi; set +a
+  scripts/ensure-llm-model.sh && ok "LLM_MODEL ${LLM_MODEL} ready" )
 
 # ── Check credentials ─────────────────────────────────────────────────────────
 hdr "4/5  Checking build credentials..."

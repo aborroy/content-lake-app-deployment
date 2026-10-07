@@ -245,7 +245,7 @@ services:
       HXPR_PASSWORD: ${HXPR_PASSWORD}
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
-      LLM_MODEL: ${LLM_MODEL:-ai/qwen2.5}
+      LLM_MODEL: ${LLM_MODEL:-local/olmo3-7b-instruct:Q4_K_M}
       # Pinned to 0 so a generation delta is attributable to a change rather than to sampling
       # noise: at 0.3 the same question yields a different answer per run, and the tier-2 judge
       # metrics (faithfulness, answer_correctness, citation_accuracy) cannot form a stable

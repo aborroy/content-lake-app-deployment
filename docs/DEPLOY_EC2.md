@@ -38,12 +38,22 @@ compose services --> MODEL_RUNNER_URL (http://host.docker.internal:12434)
 
 | Container | Model | Approx. VRAM |
 |---|---|---|
-| TEI | `mixedbread-ai/mxbai-embed-large-v1` | ~0.7 GB |
-| vLLM | `Qwen/Qwen2.5-14B-Instruct-AWQ` (at `--gpu-memory-utilization 0.75`) | ~18 GB |
-| **Total** | | **~18.7 GB**, ~5.3 GB headroom |
+| TEI | `mixedbread-ai/mxbai-embed-large-v1` | ~0.9 GB |
+| TEI reranker | `BAAI/bge-reranker-v2-m3` | ~1.4 GB |
+| vLLM | `Qwen/Qwen2.5-14B-Instruct-AWQ` (at `--gpu-memory-utilization 0.75`) | ~17.4 GB |
+| **Total** | | **~19.7 GB** of the 22.5 GB that the A10G reports usable |
+
+The headroom matters: TEI takes more GPU memory for large batches during ingestion.
 
 > `Qwen2.5-14B-Instruct-AWQ` is the vLLM equivalent of Docker Model Runner's `ai/gpt-oss` --
 > same parameter class (~14B), 4-bit AWQ quantization, similar reasoning quality.
+
+> Olmo 3, the recommended model for local deployment, needs more GPU memory than this
+> instance has. Olmo 3 7B in bf16 takes about 19.8 GB in vLLM for a 16k-token context;
+> it answers well, but under ingestion load both TEI services fail with
+> `CUDA_ERROR_OUT_OF_MEMORY` (HTTP 424) while their health checks stay green. Olmo 3.1
+> 32B in 4-bit leaves room for only about 11k tokens of context. Use a 48 GB card (for
+> example a `g6e.xlarge`, NVIDIA L40S) to run Olmo 3 here.
 
 ## 1. Launch the EC2 Instance
 
@@ -256,9 +266,10 @@ SERVER_NAME=<EC2_PUBLIC_IP_OR_DOMAIN>
 # TEI + vLLM proxy listens on port 12434 (same port as Docker Model Runner)
 MODEL_RUNNER_URL=http://host.docker.internal:12434
 
-# Model names must match HuggingFace repo IDs (not Docker Model Runner aliases)
+# EMBEDDING_MODEL must match the HuggingFace repo ID that TEI loads
 EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
-LLM_MODEL=Qwen/Qwen2.5-14B-Instruct-AWQ
+# LLM_MODEL must match --served-model-name in compose.ai.yaml
+LLM_MODEL=ai/qwen2.5
 EOF
 ```
 
@@ -283,6 +294,18 @@ details on obtaining each credential.
 The AI inference stack (`compose.ai.yaml`) must be started first. On first start, TEI and vLLM
 each download their model weights (~5 GB total) from HuggingFace and cache them in `/opt/models`.
 Subsequent starts skip the download.
+
+If the vLLM log stays at `Starting to load model` and the cache in `/opt/models` stops
+growing, the Hugging Face CDN is dropping the connection. Some connections from AWS hang
+there, and the Hugging Face library does not recover. Fetch the weights with `curl`, which
+resumes and retries, then start vLLM again:
+
+```bash
+sudo scripts/fetch-hf-weights.sh Qwen/Qwen2.5-14B-Instruct-AWQ /opt/models
+docker compose -f compose.ai.yaml up -d --force-recreate vllm
+```
+
+An `HF_TOKEN` in the environment lifts the anonymous rate limit, which also helps.
 
 ```bash
 docker compose -f compose.ai.yaml up -d
@@ -319,7 +342,7 @@ curl -s -X POST http://localhost:12434/v1/embeddings \
 # End-to-end chat via proxy
 curl -s -X POST http://localhost:12434/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"Qwen/Qwen2.5-14B-Instruct-AWQ","messages":[{"role":"user","content":"ping"}],"max_tokens":5}' \
+  -d '{"model":"ai/qwen2.5","messages":[{"role":"user","content":"ping"}],"max_tokens":5}' \
   | grep -o '"object":"chat.completion"'
 ```
 
